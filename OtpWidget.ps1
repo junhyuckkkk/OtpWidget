@@ -596,19 +596,36 @@ function Get-StartupCommand {
     }
     return '"' + $exe + '"'
 }
+$script:TaskName = 'OtpWidget'
 function Test-Startup {
+    if (Get-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue) { return $true }
     $v = (Get-ItemProperty -Path $script:RunKey -Name $script:RunName -ErrorAction SilentlyContinue).$script:RunName
     return ([bool]$v -or (Test-Path $script:StartupLnk))
 }
 function Set-Startup([bool]$on) {
+    # clear every older mechanism first (Startup-folder shortcut, Run key) so only one launcher exists
     Remove-Item $script:StartupLnk -ErrorAction SilentlyContinue
-    if (-not $on) {
-        Remove-ItemProperty -Path $script:RunKey -Name $script:RunName -ErrorAction SilentlyContinue
-        return '윈도우 시작 시 자동 실행: 꺼짐'
+    Remove-ItemProperty -Path $script:RunKey -Name $script:RunName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $script:TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    if (-not $on) { return '윈도우 시작 시 자동 실행: 꺼짐' }
+    # preferred: a logon task in Task Scheduler - starts right at logon, before Explorer's startup-app delay
+    try {
+        $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+        if ((Split-Path -Leaf $exe) -ieq 'powershell.exe') {
+            $action = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR 'System32\wscript.exe') -Argument ('"' + (Join-Path $script:Dir 'OtpWidget.vbs') + '"')
+        } else {
+            $action = New-ScheduledTaskAction -Execute $exe
+        }
+        $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+        $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Priority 4
+        Register-ScheduledTask -TaskName $script:TaskName -Action $action -Trigger $trigger -Settings $settings -Force -ErrorAction Stop | Out-Null
+        return '윈도우 시작 시 자동 실행: 켜짐 (로그인 즉시)'
+    } catch {
+        # fallback: HKCU Run key (works everywhere, starts a little later)
+        New-Item -Path $script:RunKey -Force | Out-Null
+        Set-ItemProperty -Path $script:RunKey -Name $script:RunName -Value (Get-StartupCommand)
+        return '윈도우 시작 시 자동 실행: 켜짐'
     }
-    New-Item -Path $script:RunKey -Force | Out-Null
-    Set-ItemProperty -Path $script:RunKey -Name $script:RunName -Value (Get-StartupCommand)
-    return '윈도우 시작 시 자동 실행: 켜짐'
 }
 
 # context menu
