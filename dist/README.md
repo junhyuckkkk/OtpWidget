@@ -14,7 +14,7 @@ A tiny always-on-top desktop TOTP widget for Windows. Hover to expand, click a c
 - 마우스를 올리면 아래로 계정별 코드가 펼쳐지고, 벗어나면 자동으로 접힘
 - 코드를 클릭하면 클립보드에 복사 (`Copied!` 표시)
 - 남은 시간 바 (5초 이하면 빨간색)
-- **QR 코드 등록**: 화면에 QR이 보이는 상태에서 우클릭 → *Scan QR on screen* 하면 바로 추가
+- **QR 코드 등록**: 화면에 QR이 보이는 상태에서 우클릭 → *화면의 QR 코드 스캔* 하면 바로 추가
 - otpauth 링크 / 시크릿 키 직접 붙여넣기도 가능
 - 드래그로 위치 이동 (위치 기억), 윈도우 시작 시 자동 실행 가능
 
@@ -34,21 +34,21 @@ A tiny always-on-top desktop TOTP widget for Windows. Hover to expand, click a c
 
 ### 1) QR 코드로 (가장 쉬움)
 1. 사이트에서 2단계 인증 QR 코드를 화면에 띄움
-2. 위젯 아이콘 **우클릭 → Scan QR on screen**
+2. 위젯 아이콘 **우클릭 → 화면의 QR 코드 스캔**
 3. 끝. 바로 목록에 추가됩니다.
 
-QR을 캡처(Win+Shift+S)해 둔 경우엔 **Add account… → QR from clipboard image**.
+QR을 캡처(Win+Shift+S)해 둔 경우엔 **계정 추가… → 클립보드 이미지에서 QR 읽기**.
 
 ### 2) 링크나 키를 직접 붙여넣기
-아이콘 **우클릭 → Add account…** 에서 `otpauth://totp/...` 링크 또는 시크릿 키(예: `JBSW Y3DP EHPK 3PXP`)와 이름을 입력.
+아이콘 **우클릭 → 계정 추가…** 에서 `otpauth://totp/...` 링크 또는 시크릿 키(예: `JBSW Y3DP EHPK 3PXP`)와 이름을 입력.
 
 ### 3) 백업 파일로 한꺼번에 가져오기
-브라우저 확장 **Authenticator** 등에서 *백업 → 내보내기*로 받은 파일을 아이콘 **우클릭 → Import backup file…** 에서 선택하면 끝. 파일 안의 `otpauth://` 링크를 전부 찾아 등록하고, 이미 있는 계정은 건너뜁니다 (txt, json 모두 가능).
+브라우저 확장 **Authenticator** 등에서 *백업 → 내보내기*로 받은 파일을 아이콘 **우클릭 → 백업 파일 가져오기…** 에서 선택하면 끝. 파일 안의 `otpauth://` 링크를 전부 찾아 등록하고, 이미 있는 계정은 건너뜁니다 (txt, json 모두 가능).
 
-파일 대신 내용을 복사해 둔 상태라면 **Add account…** 창의 입력칸에 여러 줄을 그대로 붙여넣고 *Add* 해도 됩니다.
+파일 대신 내용을 복사해 둔 상태라면 **계정 추가…** 창의 입력칸에 여러 줄을 그대로 붙여넣고 *추가* 해도 됩니다.
 
 ## 윈도우 시작 시 자동 실행
-아이콘 **우클릭 → Start with Windows** 체크. 시작프로그램 폴더(`shell:startup`)에 바로가기가 생기고, 체크를 풀면 삭제됩니다.
+아이콘 **우클릭 → 윈도우 시작 시 자동 실행** 체크. 시작프로그램 폴더(`shell:startup`)에 바로가기가 생기고, 체크를 풀면 삭제됩니다.
 
 ## 파일 구성
 | 파일 | 설명 |
@@ -76,7 +76,7 @@ ps2exe가 없으면 PowerShell Gallery에서 자동으로 받아 `dist\OtpWidget
 
 ## English
 
-A tiny always-on-top TOTP widget for Windows, written as a single PowerShell + WPF script.
+A tiny always-on-top TOTP widget for Windows, written as a single PowerShell + WPF script. The UI is in Korean.
 
 - Small round `OTP` icon; hover to expand the list of codes, move away to collapse
 - Click a code to copy it

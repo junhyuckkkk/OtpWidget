@@ -1,4 +1,4 @@
-# OtpWidget - hover-to-expand desktop TOTP widget (PowerShell + WPF, no install needed)
+﻿# OtpWidget - hover-to-expand desktop TOTP widget (PowerShell + WPF, no install needed)
 # https://github.com/  (see README.md)
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
@@ -59,7 +59,7 @@ function Parse-OtpUri {
         if (-not $label) { $name = $q['issuer'] }
         elseif ($label -notmatch ':' -and $label -ne $q['issuer']) { $name = "$($q['issuer']): $label" }
     }
-    if (-not $name) { $name = 'Account' }
+    if (-not $name) { $name = '계정' }
     $digits = 6; if ($q['digits']) { $digits = [int]$q['digits'] }
     $period = 30; if ($q['period']) { $period = [int]$q['period'] }
     return @{ name = $name; secret = $q['secret']; digits = $digits; period = $period; uri = $uri }
@@ -101,21 +101,21 @@ function Load-Accounts {
 function Add-AccountFromUri {
     param([string]$Uri)
     $a = Parse-OtpUri $Uri
-    if (-not $a) { return "Not a valid otpauth://totp link" }
+    if (-not $a) { return "올바른 otpauth://totp 링크가 아닙니다" }
     $norm = ($a.secret.ToUpper() -replace '[^A-Z2-7]', '')
     foreach ($ex in $script:Accounts) {
-        if ((($ex.secret).ToUpper() -replace '[^A-Z2-7]', '') -eq $norm) { return "Already added: $($ex.name)" }
+        if ((($ex.secret).ToUpper() -replace '[^A-Z2-7]', '') -eq $norm) { return "이미 등록됨: $($ex.name)" }
     }
     Add-Content -Path $script:SecretsTxt -Value $Uri.Trim() -Encoding UTF8
     Build-Rows
-    return "Added: $($a.name)"
+    return "추가됨: $($a.name)"
 }
 
 # Import every otpauth://totp/... link found anywhere in a text (backup exports, JSON, pasted lines...)
 function Import-OtpText {
     param([string]$Text)
     $uris = @([regex]::Matches($Text, 'otpauth://totp/[^\s"''<>]+') | ForEach-Object { $_.Value } | Select-Object -Unique)
-    if ($uris.Count -eq 0) { return 'No otpauth://totp links found' }
+    if ($uris.Count -eq 0) { return 'otpauth://totp 링크를 찾지 못했습니다' }
     $added = 0; $skipped = 0; $bad = 0
     $known = @{}
     foreach ($ex in $script:Accounts) { $known[(($ex.secret).ToUpper() -replace '[^A-Z2-7]', '')] = $true }
@@ -128,18 +128,18 @@ function Import-OtpText {
         $known[$norm] = $true; $added++
     }
     if ($added -gt 0) { Build-Rows }
-    $msg = "Imported $added account(s)"
-    if ($skipped) { $msg += ", $skipped already present" }
-    if ($bad) { $msg += ", $bad invalid" }
+    $msg = "${added}개 계정 가져옴"
+    if ($skipped) { $msg += ", ${skipped}개는 이미 등록됨" }
+    if ($bad) { $msg += ", ${bad}개는 잘못된 링크" }
     return $msg
 }
 
 function Import-BackupFile {
     $dlg = New-Object Microsoft.Win32.OpenFileDialog
-    $dlg.Title = 'Select a backup / export file containing otpauth links'
-    $dlg.Filter = 'Backup files (*.txt;*.json;*.csv)|*.txt;*.json;*.csv|All files (*.*)|*.*'
-    if ($dlg.ShowDialog() -ne $true) { return 'Cancelled' }
-    try { $text = Get-Content $dlg.FileName -Raw -Encoding UTF8 } catch { return "Cannot read file: $($_.Exception.Message)" }
+    $dlg.Title = 'otpauth 링크가 들어 있는 백업/내보내기 파일 선택'
+    $dlg.Filter = '백업 파일 (*.txt;*.json;*.csv)|*.txt;*.json;*.csv|모든 파일 (*.*)|*.*'
+    if ($dlg.ShowDialog() -ne $true) { return '취소됨' }
+    try { $text = Get-Content $dlg.FileName -Raw -Encoding UTF8 } catch { return "파일을 읽을 수 없습니다: $($_.Exception.Message)" }
     return (Import-OtpText $text)
 }
 
@@ -148,7 +148,7 @@ function Ensure-ZXing {
     $dll = Join-Path $script:LibDir 'zxing.dll'
     if (-not (Test-Path $dll)) {
         try {
-            Show-Status 'Downloading QR library (ZXing.Net)...'
+            Show-Status 'QR 라이브러리(ZXing.Net) 다운로드 중...'
             $script:Window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
             New-Item -ItemType Directory -Force $script:LibDir | Out-Null
             $tmp = Join-Path $env:TEMP 'zxing_net.nupkg.zip'
@@ -162,7 +162,7 @@ function Ensure-ZXing {
             Remove-Item $tmp -ErrorAction SilentlyContinue
             Unblock-File $dll -ErrorAction SilentlyContinue
         } catch {
-            Show-Status "QR library download failed: $($_.Exception.Message)"
+            Show-Status "QR 라이브러리 다운로드 실패: $($_.Exception.Message)"
             return $false
         }
     }
@@ -172,7 +172,7 @@ function Ensure-ZXing {
         $script:ZXingLoaded = $true
         return $true
     } catch {
-        Show-Status "Could not load zxing.dll: $($_.Exception.Message)"
+        Show-Status "zxing.dll을 불러올 수 없습니다: $($_.Exception.Message)"
         return $false
     }
 }
@@ -201,8 +201,8 @@ function Import-QrTexts {
     param([string[]]$Texts)
     $otp = @($Texts | Where-Object { $_ -like 'otpauth://totp/*' })
     if ($otp.Count -eq 0) {
-        if ($Texts.Count -eq 0) { return 'No QR code found' }
-        return 'QR found, but it is not an OTP (otpauth://totp) code'
+        if ($Texts.Count -eq 0) { return 'QR 코드를 찾지 못했습니다' }
+        return 'QR은 찾았지만 OTP(otpauth://totp) 코드가 아닙니다'
     }
     $msgs = @()
     foreach ($u in $otp) { $msgs += (Add-AccountFromUri $u) }
@@ -211,7 +211,7 @@ function Import-QrTexts {
 
 function Scan-QrOnScreen {
     param($HideWindows = @())
-    if (-not (Ensure-ZXing)) { return 'QR library unavailable' }
+    if (-not (Ensure-ZXing)) { return 'QR 라이브러리를 사용할 수 없습니다' }
     $saved = @{}
     foreach ($w in $HideWindows) { $saved[$w] = $w.Opacity; $w.Opacity = 0 }
     $script:Window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
@@ -222,8 +222,8 @@ function Scan-QrOnScreen {
 }
 
 function Scan-QrFromClipboard {
-    if (-not (Ensure-ZXing)) { return 'QR library unavailable' }
-    if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) { return 'No image in clipboard' }
+    if (-not (Ensure-ZXing)) { return 'QR 라이브러리를 사용할 수 없습니다' }
+    if (-not [System.Windows.Forms.Clipboard]::ContainsImage()) { return '클립보드에 이미지가 없습니다' }
     $img = [System.Windows.Forms.Clipboard]::GetImage()
     $bmp = New-Object System.Drawing.Bitmap $img
     try { $texts = Decode-QrTexts $bmp } finally { $bmp.Dispose(); $img.Dispose() }
@@ -309,7 +309,7 @@ function Build-Rows {
     $script:Accounts = Load-Accounts
     if ($script:Accounts.Count -eq 0) {
         $tb = New-Object System.Windows.Controls.TextBlock
-        $tb.Text = "No accounts yet.`nRight-click the icon:`n - Scan QR on screen`n - Add account (paste link / key)"
+        $tb.Text = "등록된 계정이 없습니다.`n아이콘을 우클릭하세요:`n - 화면의 QR 코드 스캔`n - 백업 파일 가져오기`n - 계정 추가 (링크/키 붙여넣기)"
         $tb.Foreground = '#D1D5DB'; $tb.Margin = '8'; $tb.FontFamily = 'Segoe UI'; $tb.FontSize = 12
         $script:Items.Children.Add($tb) | Out-Null
         return
@@ -352,7 +352,7 @@ function Build-Rows {
             $c = Get-Totp -Key $acct.key -Digits $acct.digits -Period $acct.period
             [System.Windows.Clipboard]::SetText($c)
             $nameTb = $this.Child.Children[0]
-            $nameTb.Text = 'Copied!'; $nameTb.Foreground = '#34D399'
+            $nameTb.Text = '복사됨!'; $nameTb.Foreground = '#34D399'
             $t = New-Object System.Windows.Threading.DispatcherTimer
             $t.Interval = [TimeSpan]::FromMilliseconds(900)
             $t.Tag = @{ tb = $nameTb; name = $acct.name }
@@ -384,7 +384,7 @@ function Show-AddDialog {
     [xml]$dx = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="OtpWidget - Add account" Width="440" SizeToContent="Height" ResizeMode="NoResize"
+        Title="OtpWidget - 계정 추가" Width="440" SizeToContent="Height" ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen" Topmost="True" Background="#1F2937" FontFamily="Segoe UI">
   <Window.Resources>
     <Style TargetType="Button">
@@ -403,22 +403,22 @@ function Show-AddDialog {
     </Style>
   </Window.Resources>
   <StackPanel Margin="16">
-    <TextBlock Text="1) Easiest: show the QR code on screen, then" Foreground="#D1D5DB"/>
+    <TextBlock Text="1) 가장 쉬움: QR 코드를 화면에 띄운 뒤" Foreground="#D1D5DB"/>
     <StackPanel Orientation="Horizontal" Margin="0,8,0,14">
-      <Button Name="BtnScan" Content="Scan QR on screen" FontWeight="Bold" Background="#2563EB"/>
-      <Button Name="BtnClip" Content="QR from clipboard image"/>
+      <Button Name="BtnScan" Content="화면의 QR 코드 스캔" FontWeight="Bold" Background="#2563EB"/>
+      <Button Name="BtnClip" Content="클립보드 이미지에서 QR 읽기"/>
     </StackPanel>
-    <TextBlock Text="2) Or import a backup export (Authenticator, etc.)" Foreground="#D1D5DB"/>
+    <TextBlock Text="2) 또는 백업 파일 가져오기 (Authenticator 확장 등에서 내보낸 파일)" Foreground="#D1D5DB"/>
     <StackPanel Orientation="Horizontal" Margin="0,8,0,14">
-      <Button Name="BtnFile" Content="Import backup file..."/>
+      <Button Name="BtnFile" Content="백업 파일 가져오기..."/>
     </StackPanel>
-    <TextBlock Text="3) Or paste here: otpauth:// links (one or many lines) or a secret key" Foreground="#D1D5DB"/>
+    <TextBlock Text="3) 또는 여기에 붙여넣기: otpauth:// 링크(여러 줄 가능) 또는 시크릿 키" Foreground="#D1D5DB"/>
     <TextBox Name="Input" Height="72" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Margin="0,6,0,8"/>
-    <TextBlock Text="Name (only needed when pasting a bare secret key)" Foreground="#9CA3AF" FontSize="11"/>
+    <TextBlock Text="이름 (시크릿 키만 붙여넣을 때 필요)" Foreground="#9CA3AF" FontSize="11"/>
     <TextBox Name="NameBox" Margin="0,4,0,8"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-      <Button Name="BtnAdd" Content="Add"/>
-      <Button Name="BtnClose" Content="Close" Margin="0"/>
+      <Button Name="BtnAdd" Content="추가"/>
+      <Button Name="BtnClose" Content="닫기" Margin="0"/>
     </StackPanel>
     <TextBlock Name="DStatus" Foreground="#FBBF24" Margin="0,10,0,0" TextWrapping="Wrap"/>
   </StackPanel>
@@ -431,7 +431,7 @@ function Show-AddDialog {
     $script:DlgInput = $dlg.FindName('Input'); $script:DlgName = $dlg.FindName('NameBox')
 
     $dlg.FindName('BtnScan').Add_Click({
-        $script:DStatus.Text = 'Scanning screen...'
+        $script:DStatus.Text = '화면 스캔 중...'
         $script:DStatus.Text = Scan-QrOnScreen -HideWindows @($script:Dlg, $script:Window)
     })
     $dlg.FindName('BtnClip').Add_Click({ $script:DStatus.Text = Scan-QrFromClipboard })
@@ -439,17 +439,17 @@ function Show-AddDialog {
     $dlg.FindName('BtnAdd').Add_Click({
         $txt = [string]$script:DlgInput.Text
         $txt = $txt.Trim()
-        if (-not $txt) { $script:DStatus.Text = 'Paste links or a secret key first'; return }
+        if (-not $txt) { $script:DStatus.Text = '링크나 시크릿 키를 먼저 붙여넣으세요'; return }
         if ($txt -match 'otpauth://totp/') {
             $msg = Import-OtpText $txt
         } else {
             $secret = ($txt.ToUpper() -replace '[^A-Z2-7]', '')
-            if ($secret.Length -lt 8) { $script:DStatus.Text = 'That does not look like a Base32 secret key'; return }
-            $n = ([string]$script:DlgName.Text).Trim(); if (-not $n) { $n = 'Account' }
+            if ($secret.Length -lt 8) { $script:DStatus.Text = 'Base32 시크릿 키 형식이 아닙니다'; return }
+            $n = ([string]$script:DlgName.Text).Trim(); if (-not $n) { $n = '계정' }
             $msg = Add-AccountFromUri (New-OtpUri -Name $n -Secret $secret)
         }
         $script:DStatus.Text = $msg
-        if ($msg -like 'Added:*' -or $msg -like 'Imported*') { $script:DlgInput.Text = ''; $script:DlgName.Text = '' }
+        if ($msg -like '추가됨:*' -or ($msg -like '*가져옴*' -and $msg -notlike '0개*')) { $script:DlgInput.Text = ''; $script:DlgName.Text = '' }
     })
     $dlg.FindName('BtnClose').Add_Click({ $script:Dlg.Close() })
     $dlg.ShowDialog() | Out-Null
@@ -479,7 +479,7 @@ $script:Icon.Add_MouseLeftButtonDown({
 $script:StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'OtpWidget.lnk'
 function Test-Startup { return (Test-Path $script:StartupLnk) }
 function Set-Startup([bool]$on) {
-    if (-not $on) { Remove-Item $script:StartupLnk -ErrorAction SilentlyContinue; return 'Start with Windows: off' }
+    if (-not $on) { Remove-Item $script:StartupLnk -ErrorAction SilentlyContinue; return '윈도우 시작 시 자동 실행: 꺼짐' }
     $sh = New-Object -ComObject WScript.Shell
     $lnk = $sh.CreateShortcut($script:StartupLnk)
     $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
@@ -497,22 +497,22 @@ function Set-Startup([bool]$on) {
     $lnk.WorkingDirectory = $script:Dir
     $lnk.Description = 'OtpWidget'
     $lnk.Save()
-    return 'Start with Windows: on'
+    return '윈도우 시작 시 자동 실행: 켜짐'
 }
 
 # context menu
 $menu = New-Object System.Windows.Controls.ContextMenu
 # NOTE: PowerShell variables are case-insensitive - do not name anything here $items (would clobber $script:Items)
 $menuDefs = @(
-    @{ h = 'Scan QR on screen';     a = { Show-Status (Scan-QrOnScreen -HideWindows @($script:Window)) } },
-    @{ h = 'Add account...';        a = { Show-AddDialog } },
-    @{ h = 'Import backup file...'; a = { Show-Status (Import-BackupFile) } },
-    @{ h = 'Reload accounts';       a = { Build-Rows; Show-Status "Reloaded ($($script:Accounts.Count) accounts)" } },
-    @{ h = 'Open secrets folder';   a = { Start-Process explorer.exe $script:Dir } },
+    @{ h = '화면의 QR 코드 스캔';        a = { Show-Status (Scan-QrOnScreen -HideWindows @($script:Window)) } },
+    @{ h = '계정 추가...';               a = { Show-AddDialog } },
+    @{ h = '백업 파일 가져오기...';       a = { Show-Status (Import-BackupFile) } },
+    @{ h = '계정 다시 불러오기';          a = { Build-Rows; Show-Status "다시 불러옴 ($($script:Accounts.Count)개 계정)" } },
+    @{ h = '설정 폴더 열기';             a = { Start-Process explorer.exe $script:Dir } },
     'sep',
-    @{ h = 'Start with Windows';    check = $true; a = { Show-Status (Set-Startup $this.IsChecked) } },
+    @{ h = '윈도우 시작 시 자동 실행';    check = $true; a = { Show-Status (Set-Startup $this.IsChecked) } },
     'sep',
-    @{ h = 'Exit';                  a = { $script:Window.Close() } }
+    @{ h = '종료';                      a = { $script:Window.Close() } }
 )
 foreach ($def in $menuDefs) {
     if ($def -eq 'sep') { $menu.Items.Add((New-Object System.Windows.Controls.Separator)) | Out-Null; continue }
