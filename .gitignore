@@ -8,3 +8,6 @@ lib/
 
 # build tooling
 tools/
+
+# extracted copies of the zip
+dist/OtpWidget/
