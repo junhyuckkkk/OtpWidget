@@ -295,13 +295,11 @@ $script:StatusTimer.Add_Tick({
     $script:Status.Visibility = 'Collapsed'
     if (-not $script:Root.IsMouseOver) { Collapse-Panel } else { Expand-Panel }
 })
-function Show-Status([string]$msg, [int]$seconds = 4) {
+function Show-Status([string]$msg) {
     $script:Status.Text = $msg
     $script:Status.Visibility = 'Visible'
     Expand-Panel
-    $script:StatusTimer.Stop()
-    $script:StatusTimer.Interval = [TimeSpan]::FromSeconds($seconds)
-    $script:StatusTimer.Start()
+    $script:StatusTimer.Stop(); $script:StatusTimer.Start()
 }
 
 function Build-Rows {
@@ -596,11 +594,4 @@ $script:Timer.Add_Tick({ if ($script:Panel.Visibility -eq 'Visible') { Update-Co
 $script:Timer.Start()
 
 Build-Rows
-
-# first run (no accounts yet): open the panel for a few seconds so the tiny icon is not missed
-$script:Window.Add_ContentRendered({
-    if ($script:Accounts.Count -eq 0) {
-        Show-Status 'OtpWidget이 실행되었습니다. 이 아이콘은 항상 화면 위에 떠 있습니다.' 10
-    }
-})
 $script:Window.ShowDialog() | Out-Null
