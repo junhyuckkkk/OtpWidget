@@ -21,7 +21,7 @@ A tiny always-on-top desktop TOTP widget for Windows. Hover to expand, click a c
 ## 설치 & 실행
 
 ### 방법 A. 실행 파일 (권장)
-1. [Releases](../../releases)에서 `OtpWidget.exe` 다운로드
+1. **[OtpWidget.exe 다운로드](https://github.com/junhyuckkkk/OtpWidget/raw/main/dist/OtpWidget.exe)** (또는 [Releases](../../releases))
 2. 원하는 폴더에 두고 더블클릭
 
 > Windows SmartScreen 경고가 뜨면 **추가 정보 → 실행**을 누르세요. 코드 서명이 없는 개인 프로젝트라 뜨는 경고입니다. 불안하면 아래 방법 B로 스크립트를 직접 읽고 실행하세요.
@@ -85,7 +85,7 @@ A tiny always-on-top TOTP widget for Windows, written as a single PowerShell + W
 - Bulk import: paste exported `otpauth://` lines (e.g. from the Authenticator browser extension) into `secrets.txt`
 - Right-click → *Start with Windows* to toggle autostart
 
-**Run:** download `OtpWidget.exe` from Releases, or clone and double-click `OtpWidget.vbs`. No install, no admin.
+**Run:** [download `OtpWidget.exe`](https://github.com/junhyuckkkk/OtpWidget/raw/main/dist/OtpWidget.exe), or clone and double-click `OtpWidget.vbs`. No install, no admin.
 Secrets are stored in plain text in `secrets.txt` next to the executable; keep that folder private.
 QR decoding uses [ZXing.Net](https://github.com/micjahn/ZXing.Net), downloaded from NuGet on first use.
 
