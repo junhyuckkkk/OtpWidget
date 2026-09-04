@@ -18,9 +18,24 @@ $script:SecretsTxt  = Join-Path $script:DataDir 'secrets.txt'
 $script:StatePath   = Join-Path $script:DataDir 'state.json'
 $script:LibDir      = Join-Path $script:DataDir 'lib'
 
+# startup log (small, for diagnosing "it did not start" reports)
+$script:LogPath = Join-Path $script:DataDir 'startup.log'
+function Write-Log([string]$msg) {
+    try {
+        $line = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + '  ' + $msg
+        Add-Content -Path $script:LogPath -Value $line -Encoding UTF8
+        if ((Get-Item $script:LogPath).Length -gt 200KB) { Get-Content $script:LogPath -Tail 200 | Set-Content $script:LogPath -Encoding UTF8 }
+    } catch { }
+}
+Write-Log ("start  exe=" + [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName + "  dir=" + $script:Dir)
+
 # single instance: a second launch just exits (the first one keeps running)
 $script:Mutex = New-Object System.Threading.Mutex($false, 'Local\OtpWidget-single-instance')
-if (-not $script:Mutex.WaitOne(0, $false)) { exit }
+if (-not $script:Mutex.WaitOne(0, $false)) { Write-Log 'exit: another instance is already running'; exit }
+
+# WPF hardware rendering makes some graphics drivers (seen with Intel) reserve ~1 GB per window.
+# The widget is tiny, so software rendering is more than enough and keeps memory near 100 MB.
+[System.Windows.Media.RenderOptions]::ProcessRenderMode = [System.Windows.Interop.RenderMode]::SoftwareOnly
 $script:ZXingUrl    = 'https://www.nuget.org/api/v2/package/ZXing.Net/0.16.9'
 $script:ZXingLoaded = $false
 $script:Accounts    = @()
@@ -634,4 +649,11 @@ $script:Window.Add_ContentRendered({
         Show-Status 'OtpWidget이 실행되었습니다. 이 아이콘은 항상 화면 위에 떠 있습니다.' 10
     }
 })
-$script:Window.ShowDialog() | Out-Null
+Write-Log ("ready  accounts=" + $script:Accounts.Count + "  pos=" + [int]$script:Window.Left + "," + [int]$script:Window.Top)
+try {
+    $script:Window.ShowDialog() | Out-Null
+    Write-Log 'exit: closed by user'
+} catch {
+    Write-Log ('error: ' + $_.Exception.Message)
+    throw
+}
