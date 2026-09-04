@@ -1,0 +1,10 @@
+# real secrets - never commit
+secrets.txt
+secrets.json
+
+# runtime files
+state.json
+lib/
+
+# build tooling
+tools/

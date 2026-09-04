@@ -1,0 +1,91 @@
+# OtpWidget
+
+**바탕화면에 항상 떠 있는 작은 OTP(2단계 인증) 위젯** — 평소엔 작은 아이콘, 마우스를 올리면 코드가 펼쳐지고, 클릭하면 복사.
+
+A tiny always-on-top desktop TOTP widget for Windows. Hover to expand, click a code to copy. No installation, no admin rights. *(English below)*
+
+![widget](docs/widget.png)
+
+## 왜 만들었나
+브라우저 확장 Authenticator는 매번 클릭하고 팝업이 뜨길 기다려야 해서 불편했습니다. 바탕화면 한 구석에 항상 떠 있으면서 마우스만 올리면 바로 보이는 위젯이 필요했습니다.
+
+## 기능
+- 항상 맨 위에 떠 있는 작은 원형 `OTP` 아이콘
+- 마우스를 올리면 아래로 계정별 코드가 펼쳐지고, 벗어나면 자동으로 접힘
+- 코드를 클릭하면 클립보드에 복사 (`Copied!` 표시)
+- 남은 시간 바 (5초 이하면 빨간색)
+- **QR 코드 등록**: 화면에 QR이 보이는 상태에서 우클릭 → *Scan QR on screen* 하면 바로 추가
+- otpauth 링크 / 시크릿 키 직접 붙여넣기도 가능
+- 드래그로 위치 이동 (위치 기억), 윈도우 시작 시 자동 실행 가능
+
+## 설치 & 실행
+
+### 방법 A. 실행 파일 (권장)
+1. [Releases](../../releases)에서 `OtpWidget.exe` 다운로드
+2. 원하는 폴더에 두고 더블클릭
+
+> Windows SmartScreen 경고가 뜨면 **추가 정보 → 실행**을 누르세요. 코드 서명이 없는 개인 프로젝트라 뜨는 경고입니다. 불안하면 아래 방법 B로 스크립트를 직접 읽고 실행하세요.
+
+### 방법 B. 스크립트 그대로 실행 (설치 없음)
+1. 이 저장소를 다운로드(Code → Download ZIP) 후 압축 해제
+2. `OtpWidget.vbs` 더블클릭 (콘솔 창 없이 실행됨)
+
+## 계정 등록
+
+### 1) QR 코드로 (가장 쉬움)
+1. 사이트에서 2단계 인증 QR 코드를 화면에 띄움
+2. 위젯 아이콘 **우클릭 → Scan QR on screen**
+3. 끝. 바로 목록에 추가됩니다.
+
+QR을 캡처(Win+Shift+S)해 둔 경우엔 **Add account… → QR from clipboard image**.
+
+### 2) 링크나 키를 직접 붙여넣기
+아이콘 **우클릭 → Add account…** 에서 `otpauth://totp/...` 링크 또는 시크릿 키(예: `JBSW Y3DP EHPK 3PXP`)와 이름을 입력.
+
+### 3) 다른 앱에서 한꺼번에 가져오기
+브라우저 확장 **Authenticator** 등에서 *백업 → 텍스트로 내보내기*한 내용을 `secrets.txt`에 그대로 붙여넣기 (한 줄에 하나의 `otpauth://` 링크). 그 뒤 우클릭 → *Reload accounts*.
+
+`secrets.example.txt`를 `secrets.txt`로 이름 바꿔 시작해도 됩니다.
+
+## 윈도우 시작 시 자동 실행
+`Win + R` → `shell:startup` 으로 열리는 폴더에 `OtpWidget.exe`(또는 `OtpWidget.vbs`)의 바로가기를 넣으면 됩니다.
+
+## 파일 구성
+| 파일 | 설명 |
+|---|---|
+| `OtpWidget.ps1` | 위젯 본체 (PowerShell + WPF, 단일 파일) |
+| `OtpWidget.vbs` | 콘솔 창 없이 실행하는 런처 |
+| `secrets.txt` | 내 계정 목록 (직접 생성, **git에 올라가지 않음**) |
+| `secrets.example.txt` | 샘플 |
+| `state.json` | 위젯 위치 (자동 생성) |
+| `lib/zxing.dll` | QR 디코더. 첫 QR 스캔 때 [ZXing.Net](https://github.com/micjahn/ZXing.Net) (NuGet)에서 자동 다운로드 |
+| `build.ps1` | `dist\OtpWidget.exe` 빌드 (ps2exe 사용) |
+
+## 보안 주의
+- 시크릿은 `secrets.txt`에 **평문**으로 저장됩니다. 공유 PC나 클라우드 동기화 폴더에는 두지 마세요.
+- 위젯은 네트워크에 아무것도 보내지 않습니다. (QR 라이브러리 최초 다운로드 1회 제외)
+- 자리를 비울 땐 Win+L.
+
+## 직접 빌드
+```powershell
+.\build.ps1
+```
+ps2exe가 없으면 PowerShell Gallery에서 자동으로 받아 `dist\OtpWidget.exe`를 만듭니다.
+
+---
+
+## English
+
+A tiny always-on-top TOTP widget for Windows, written as a single PowerShell + WPF script.
+
+- Small round `OTP` icon; hover to expand the list of codes, move away to collapse
+- Click a code to copy it
+- Countdown bar per account
+- Add accounts by **scanning a QR code that is visible on screen** (right-click → *Scan QR on screen*), from a clipboard image, or by pasting an `otpauth://` link / secret key
+- Bulk import: paste exported `otpauth://` lines (e.g. from the Authenticator browser extension) into `secrets.txt`
+
+**Run:** download `OtpWidget.exe` from Releases, or clone and double-click `OtpWidget.vbs`. No install, no admin.
+Secrets are stored in plain text in `secrets.txt` next to the executable; keep that folder private.
+QR decoding uses [ZXing.Net](https://github.com/micjahn/ZXing.Net), downloaded from NuGet on first use.
+
+License: MIT
