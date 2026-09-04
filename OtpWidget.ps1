@@ -5,10 +5,22 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 # script dir (works both as .ps1 and when compiled to .exe with ps2exe)
 if ($MyInvocation.MyCommand.Path) { $script:Dir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 else { $script:Dir = Split-Path -Parent ([System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName) }
-$script:SecretsJson = Join-Path $script:Dir 'secrets.json'
-$script:SecretsTxt  = Join-Path $script:Dir 'secrets.txt'
-$script:StatePath   = Join-Path $script:Dir 'state.json'
-$script:LibDir      = Join-Path $script:Dir 'lib'
+# All user data lives in %APPDATA%\OtpWidget so every copy of the widget (exe, script, unzipped
+# folder) sees the same accounts. Files found next to the executable are migrated once.
+$script:DataDir     = Join-Path $env:APPDATA 'OtpWidget'
+New-Item -ItemType Directory -Force $script:DataDir | Out-Null
+foreach ($f in 'secrets.txt', 'secrets.json', 'state.json') {
+    $old = Join-Path $script:Dir $f; $new = Join-Path $script:DataDir $f
+    if ((Test-Path $old) -and -not (Test-Path $new)) { Copy-Item $old $new }
+}
+$script:SecretsJson = Join-Path $script:DataDir 'secrets.json'
+$script:SecretsTxt  = Join-Path $script:DataDir 'secrets.txt'
+$script:StatePath   = Join-Path $script:DataDir 'state.json'
+$script:LibDir      = Join-Path $script:DataDir 'lib'
+
+# single instance: a second launch just exits (the first one keeps running)
+$script:Mutex = New-Object System.Threading.Mutex($false, 'Local\OtpWidget-single-instance')
+if (-not $script:Mutex.WaitOne(0, $false)) { exit }
 $script:ZXingUrl    = 'https://www.nuget.org/api/v2/package/ZXing.Net/0.16.9'
 $script:ZXingLoaded = $false
 $script:Accounts    = @()
@@ -38,6 +50,7 @@ function Get-Totp {
     if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($bytes) }
     $hmac = New-Object System.Security.Cryptography.HMACSHA1 (,$Key)
     $hash = $hmac.ComputeHash($bytes)
+    $hmac.Dispose()
     $offset = $hash[$hash.Length - 1] -band 0x0F
     $code = (([int]$hash[$offset] -band 0x7F) -shl 24) -bor ([int]$hash[$offset + 1] -shl 16) -bor ([int]$hash[$offset + 2] -shl 8) -bor [int]$hash[$offset + 3]
     return ($code % [int][math]::Pow(10, $Digits)).ToString().PadLeft($Digits, '0')
@@ -280,8 +293,17 @@ try {
 if (Test-Path $script:StatePath) {
     try {
         $st = Get-Content $script:StatePath -Raw | ConvertFrom-Json
-        if ($st.left -ne $null) { $script:Window.Left = [double]$st.left }
-        if ($st.top  -ne $null) { $script:Window.Top  = [double]$st.top }
+        if ($st.left -ne $null -and $st.top -ne $null) {
+            # only restore the saved spot if it is on a monitor that exists right now
+            # (a laptop undocked from its second screen would otherwise show the widget off-screen)
+            $vsL = [System.Windows.SystemParameters]::VirtualScreenLeft; $vsT = [System.Windows.SystemParameters]::VirtualScreenTop
+            $vsR = $vsL + [System.Windows.SystemParameters]::VirtualScreenWidth; $vsB = $vsT + [System.Windows.SystemParameters]::VirtualScreenHeight
+            $cx = [double]$st.left + 23; $cy = [double]$st.top + 23
+            if ($cx -ge $vsL -and $cx -le $vsR -and $cy -ge $vsT -and $cy -le $vsB) {
+                $script:Window.Left = [double]$st.left
+                $script:Window.Top  = [double]$st.top
+            }
+        }
     } catch { }
 }
 function Save-State {
@@ -317,7 +339,7 @@ function Build-Rows {
     $script:Accounts = Load-Accounts
     if ($script:Accounts.Count -eq 0) {
         $tb = New-Object System.Windows.Controls.TextBlock
-        $tb.Text = "등록된 계정이 없습니다.`n아이콘을 우클릭하세요:`n - 화면의 QR 코드 스캔`n - 백업 파일 가져오기`n - 계정 추가 (링크/키 붙여넣기)`n`n계정 파일: secrets.txt (exe와 같은 폴더)"
+        $tb.Text = "등록된 계정이 없습니다.`n아이콘을 우클릭하세요:`n - 화면의 QR 코드 스캔`n - 백업 파일 가져오기`n - 계정 추가 (링크/키 붙여넣기)`n`n계정 파일: %APPDATA%\OtpWidget\secrets.txt"
         $tb.Foreground = '#D1D5DB'; $tb.Margin = '8'; $tb.FontFamily = 'Segoe UI'; $tb.FontSize = 12
         $script:Items.Children.Add($tb) | Out-Null
         return
@@ -547,28 +569,30 @@ $script:Icon.Add_MouseLeftButtonDown({
     if ($script:Root.IsMouseOver) { Expand-Panel }
 })
 
-# ---------- Start with Windows (shortcut in the user's Startup folder) ----------
-$script:StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'OtpWidget.lnk'
-function Test-Startup { return (Test-Path $script:StartupLnk) }
-function Set-Startup([bool]$on) {
-    if (-not $on) { Remove-Item $script:StartupLnk -ErrorAction SilentlyContinue; return '윈도우 시작 시 자동 실행: 꺼짐' }
-    $sh = New-Object -ComObject WScript.Shell
-    $lnk = $sh.CreateShortcut($script:StartupLnk)
+# ---------- Start with Windows (HKCU Run registry key; the copy that turned it on is what starts) ----------
+$script:RunKey     = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$script:RunName    = 'OtpWidget'
+$script:StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'OtpWidget.lnk'   # legacy location
+function Get-StartupCommand {
     $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
     if ((Split-Path -Leaf $exe) -ieq 'powershell.exe') {
         # running as script: launch via the vbs (no console window)
-        $lnk.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
-        $lnk.Arguments  = '"' + (Join-Path $script:Dir 'OtpWidget.vbs') + '"'
-        $ico = Join-Path $script:Dir 'assets\otp.ico'
-        if (Test-Path $ico) { $lnk.IconLocation = "$ico,0" }
-    } else {
-        $lnk.TargetPath = $exe
-        $lnk.Arguments  = ''
-        $lnk.IconLocation = "$exe,0"
+        return '"' + (Join-Path $env:WINDIR 'System32\wscript.exe') + '" "' + (Join-Path $script:Dir 'OtpWidget.vbs') + '"'
     }
-    $lnk.WorkingDirectory = $script:Dir
-    $lnk.Description = 'OtpWidget'
-    $lnk.Save()
+    return '"' + $exe + '"'
+}
+function Test-Startup {
+    $v = (Get-ItemProperty -Path $script:RunKey -Name $script:RunName -ErrorAction SilentlyContinue).$script:RunName
+    return ([bool]$v -or (Test-Path $script:StartupLnk))
+}
+function Set-Startup([bool]$on) {
+    Remove-Item $script:StartupLnk -ErrorAction SilentlyContinue
+    if (-not $on) {
+        Remove-ItemProperty -Path $script:RunKey -Name $script:RunName -ErrorAction SilentlyContinue
+        return '윈도우 시작 시 자동 실행: 꺼짐'
+    }
+    New-Item -Path $script:RunKey -Force | Out-Null
+    Set-ItemProperty -Path $script:RunKey -Name $script:RunName -Value (Get-StartupCommand)
     return '윈도우 시작 시 자동 실행: 켜짐'
 }
 

@@ -54,17 +54,19 @@ QR을 캡처(Win+Shift+S)해 둔 경우엔 **계정 추가… → 클립보드 �
 `secrets.txt`를 직접 편집했다면 우클릭 → **새로고침**.
 
 ## 윈도우 시작 시 자동 실행
-아이콘 **우클릭 → 윈도우 시작 시 자동 실행** 체크. 시작프로그램 폴더(`shell:startup`)에 바로가기가 생기고, 체크를 풀면 삭제됩니다.
+아이콘 **우클릭 → 윈도우 시작 시 자동 실행** 체크. 레지스트리(`HKCU\...\Run`)에 등록되어 로그인 직후 실행되고, 체크를 풀면 해제됩니다. 작업 관리자 → 시작 프로그램 탭에서도 확인할 수 있습니다. 위젯은 한 번에 하나만 실행되며, 이미 떠 있는 상태에서 다시 실행하면 새로 열리지 않습니다.
 
 ## 파일 구성
 | 파일 | 설명 |
 |---|---|
 | `OtpWidget.ps1` | 위젯 본체 (PowerShell + WPF, 단일 파일) |
 | `OtpWidget.vbs` | 콘솔 창 없이 실행하는 런처 |
-| `secrets.txt` | 내 계정 목록 (직접 생성, **git에 올라가지 않음**) |
 | `secrets.example.txt` | 샘플 |
-| `state.json` | 위젯 위치 (자동 생성) |
-| `lib/zxing.dll` | QR 디코더. 첫 QR 스캔 때 [ZXing.Net](https://github.com/micjahn/ZXing.Net) (NuGet)에서 자동 다운로드 |
+| `%APPDATA%\OtpWidget\secrets.txt` | 내 계정 목록. exe를 어디에 두든 여기 한 곳에 저장됨 (**git에 올라가지 않음**) |
+| `%APPDATA%\OtpWidget\state.json` | 위젯 위치 (자동 생성) |
+| `%APPDATA%\OtpWidget\lib\zxing.dll` | QR 디코더. 첫 QR 스캔 때 [ZXing.Net](https://github.com/micjahn/ZXing.Net) (NuGet)에서 자동 다운로드 |
+
+`%APPDATA%\OtpWidget`은 탐색기 주소창에 그대로 붙여넣으면 열립니다. 예전 버전처럼 exe 옆에 `secrets.txt`가 있으면 첫 실행 때 자동으로 옮겨옵니다.
 | `build.ps1` | `dist\OtpWidget.exe` 빌드 (ps2exe 사용) |
 
 ## 보안 주의
