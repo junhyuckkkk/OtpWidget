@@ -309,7 +309,7 @@ function Build-Rows {
     $script:Accounts = Load-Accounts
     if ($script:Accounts.Count -eq 0) {
         $tb = New-Object System.Windows.Controls.TextBlock
-        $tb.Text = "등록된 계정이 없습니다.`n아이콘을 우클릭하세요:`n - 화면의 QR 코드 스캔`n - 백업 파일 가져오기`n - 계정 추가 (링크/키 붙여넣기)"
+        $tb.Text = "등록된 계정이 없습니다.`n아이콘을 우클릭하세요:`n - 화면의 QR 코드 스캔`n - 백업 파일 가져오기`n - 계정 추가 (링크/키 붙여넣기)`n`n계정 파일: secrets.txt (exe와 같은 폴더)"
         $tb.Foreground = '#D1D5DB'; $tb.Margin = '8'; $tb.FontFamily = 'Segoe UI'; $tb.FontSize = 12
         $script:Items.Children.Add($tb) | Out-Null
         return
@@ -507,8 +507,7 @@ $menuDefs = @(
     @{ h = '화면의 QR 코드 스캔';        a = { Show-Status (Scan-QrOnScreen -HideWindows @($script:Window)) } },
     @{ h = '계정 추가...';               a = { Show-AddDialog } },
     @{ h = '백업 파일 가져오기...';       a = { Show-Status (Import-BackupFile) } },
-    @{ h = '계정 다시 불러오기';          a = { Build-Rows; Show-Status "다시 불러옴 ($($script:Accounts.Count)개 계정)" } },
-    @{ h = '설정 폴더 열기';             a = { Start-Process explorer.exe $script:Dir } },
+    @{ h = '새로고침';                  a = { Build-Rows; Show-Status "새로고침 완료 ($($script:Accounts.Count)개 계정)" } },
     'sep',
     @{ h = '윈도우 시작 시 자동 실행';    check = $true; a = { Show-Status (Set-Startup $this.IsChecked) } },
     'sep',
