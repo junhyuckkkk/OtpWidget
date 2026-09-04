@@ -66,7 +66,7 @@ QR을 캡처(Win+Shift+S)해 둔 경우엔 **계정 추가… → 클립보드 �
 | `%APPDATA%\OtpWidget\state.json` | 위젯 위치 (자동 생성) |
 | `%APPDATA%\OtpWidget\lib\zxing.dll` | QR 디코더. 첫 QR 스캔 때 [ZXing.Net](https://github.com/micjahn/ZXing.Net) (NuGet)에서 자동 다운로드 |
 
-`%APPDATA%\OtpWidget`은 탐색기 주소창에 그대로 붙여넣으면 열립니다. 예전 버전처럼 exe 옆에 `secrets.txt`가 있으면 첫 실행 때 자동으로 옮겨옵니다.
+`%APPDATA%\OtpWidget`은 탐색기 주소창에 그대로 붙여넣으면 열립니다. 같은 폴더의 `startup.log`에 실행/종료 기록이 남으니 "자동 실행이 안 된다" 싶을 때 먼저 열어보세요. 예전 버전처럼 exe 옆에 `secrets.txt`가 있으면 첫 실행 때 자동으로 옮겨옵니다.
 | `build.ps1` | `dist\OtpWidget.exe` 빌드 (ps2exe 사용) |
 
 ## 보안 주의
