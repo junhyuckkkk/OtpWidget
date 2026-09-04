@@ -451,9 +451,12 @@ function Set-Startup([bool]$on) {
         # running as script: launch via the vbs (no console window)
         $lnk.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
         $lnk.Arguments  = '"' + (Join-Path $script:Dir 'OtpWidget.vbs') + '"'
+        $ico = Join-Path $script:Dir 'assets\otp.ico'
+        if (Test-Path $ico) { $lnk.IconLocation = "$ico,0" }
     } else {
         $lnk.TargetPath = $exe
         $lnk.Arguments  = ''
+        $lnk.IconLocation = "$exe,0"
     }
     $lnk.WorkingDirectory = $script:Dir
     $lnk.Description = 'OtpWidget'

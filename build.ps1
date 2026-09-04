@@ -18,9 +18,12 @@ if (-not (Get-Command Invoke-ps2exe -ErrorAction SilentlyContinue)) {
     Import-Module (Join-Path $tools 'ps2exe.psd1') -Force
 }
 
+$icon = Join-Path $root 'assets\otp.ico'
+if (-not (Test-Path $icon)) { & (Join-Path $root 'make-icon.ps1') }
+
 $out = Join-Path $dist 'OtpWidget.exe'
 Invoke-ps2exe -inputFile (Join-Path $root 'OtpWidget.ps1') -outputFile $out `
-    -noConsole -STA -title 'OtpWidget' -product 'OtpWidget' -description 'Desktop TOTP widget' `
+    -noConsole -STA -iconFile $icon -title 'OtpWidget' -product 'OtpWidget' -description 'Desktop TOTP widget' `
     -version '1.0.0.0' -copyright 'MIT License'
 
 Copy-Item (Join-Path $root 'secrets.example.txt') (Join-Path $dist 'secrets.example.txt') -Force
