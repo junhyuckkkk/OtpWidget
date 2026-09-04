@@ -42,10 +42,10 @@ QR을 캡처(Win+Shift+S)해 둔 경우엔 **Add account… → QR from clipboar
 ### 2) 링크나 키를 직접 붙여넣기
 아이콘 **우클릭 → Add account…** 에서 `otpauth://totp/...` 링크 또는 시크릿 키(예: `JBSW Y3DP EHPK 3PXP`)와 이름을 입력.
 
-### 3) 다른 앱에서 한꺼번에 가져오기
-브라우저 확장 **Authenticator** 등에서 *백업 → 텍스트로 내보내기*한 내용을 `secrets.txt`에 그대로 붙여넣기 (한 줄에 하나의 `otpauth://` 링크). 그 뒤 우클릭 → *Reload accounts*.
+### 3) 백업 파일로 한꺼번에 가져오기
+브라우저 확장 **Authenticator** 등에서 *백업 → 내보내기*로 받은 파일을 아이콘 **우클릭 → Import backup file…** 에서 선택하면 끝. 파일 안의 `otpauth://` 링크를 전부 찾아 등록하고, 이미 있는 계정은 건너뜁니다 (txt, json 모두 가능).
 
-`secrets.example.txt`를 `secrets.txt`로 이름 바꿔 시작해도 됩니다.
+파일 대신 내용을 복사해 둔 상태라면 **Add account…** 창의 입력칸에 여러 줄을 그대로 붙여넣고 *Add* 해도 됩니다.
 
 ## 윈도우 시작 시 자동 실행
 아이콘 **우클릭 → Start with Windows** 체크. 시작프로그램 폴더(`shell:startup`)에 바로가기가 생기고, 체크를 풀면 삭제됩니다.

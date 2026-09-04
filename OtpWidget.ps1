@@ -111,6 +111,38 @@ function Add-AccountFromUri {
     return "Added: $($a.name)"
 }
 
+# Import every otpauth://totp/... link found anywhere in a text (backup exports, JSON, pasted lines...)
+function Import-OtpText {
+    param([string]$Text)
+    $uris = @([regex]::Matches($Text, 'otpauth://totp/[^\s"''<>]+') | ForEach-Object { $_.Value } | Select-Object -Unique)
+    if ($uris.Count -eq 0) { return 'No otpauth://totp links found' }
+    $added = 0; $skipped = 0; $bad = 0
+    $known = @{}
+    foreach ($ex in $script:Accounts) { $known[(($ex.secret).ToUpper() -replace '[^A-Z2-7]', '')] = $true }
+    foreach ($u in $uris) {
+        $a = Parse-OtpUri $u
+        if (-not $a) { $bad++; continue }
+        $norm = ($a.secret.ToUpper() -replace '[^A-Z2-7]', '')
+        if ($known[$norm]) { $skipped++; continue }
+        Add-Content -Path $script:SecretsTxt -Value $u.Trim() -Encoding UTF8
+        $known[$norm] = $true; $added++
+    }
+    if ($added -gt 0) { Build-Rows }
+    $msg = "Imported $added account(s)"
+    if ($skipped) { $msg += ", $skipped already present" }
+    if ($bad) { $msg += ", $bad invalid" }
+    return $msg
+}
+
+function Import-BackupFile {
+    $dlg = New-Object Microsoft.Win32.OpenFileDialog
+    $dlg.Title = 'Select a backup / export file containing otpauth links'
+    $dlg.Filter = 'Backup files (*.txt;*.json;*.csv)|*.txt;*.json;*.csv|All files (*.*)|*.*'
+    if ($dlg.ShowDialog() -ne $true) { return 'Cancelled' }
+    try { $text = Get-Content $dlg.FileName -Raw -Encoding UTF8 } catch { return "Cannot read file: $($_.Exception.Message)" }
+    return (Import-OtpText $text)
+}
+
 function Ensure-ZXing {
     if ($script:ZXingLoaded) { return $true }
     $dll = Join-Path $script:LibDir 'zxing.dll'
@@ -376,8 +408,12 @@ function Show-AddDialog {
       <Button Name="BtnScan" Content="Scan QR on screen" FontWeight="Bold" Background="#2563EB"/>
       <Button Name="BtnClip" Content="QR from clipboard image"/>
     </StackPanel>
-    <TextBlock Text="2) Or paste an otpauth:// link or the secret key" Foreground="#D1D5DB"/>
-    <TextBox Name="Input" Height="56" TextWrapping="Wrap" AcceptsReturn="True" Margin="0,6,0,8"/>
+    <TextBlock Text="2) Or import a backup export (Authenticator, etc.)" Foreground="#D1D5DB"/>
+    <StackPanel Orientation="Horizontal" Margin="0,8,0,14">
+      <Button Name="BtnFile" Content="Import backup file..."/>
+    </StackPanel>
+    <TextBlock Text="3) Or paste here: otpauth:// links (one or many lines) or a secret key" Foreground="#D1D5DB"/>
+    <TextBox Name="Input" Height="72" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Margin="0,6,0,8"/>
     <TextBlock Text="Name (only needed when pasting a bare secret key)" Foreground="#9CA3AF" FontSize="11"/>
     <TextBox Name="NameBox" Margin="0,4,0,8"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -391,29 +427,29 @@ function Show-AddDialog {
     $dlg = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $dx))
     $script:Dlg = $dlg
     $script:DStatus = $dlg.FindName('DStatus')
-    $input = $dlg.FindName('Input'); $nameBox = $dlg.FindName('NameBox')
+    # NOTE: $input is a reserved automatic variable in PowerShell - never use it as a control name
+    $script:DlgInput = $dlg.FindName('Input'); $script:DlgName = $dlg.FindName('NameBox')
 
     $dlg.FindName('BtnScan').Add_Click({
         $script:DStatus.Text = 'Scanning screen...'
         $script:DStatus.Text = Scan-QrOnScreen -HideWindows @($script:Dlg, $script:Window)
     })
     $dlg.FindName('BtnClip').Add_Click({ $script:DStatus.Text = Scan-QrFromClipboard })
+    $dlg.FindName('BtnFile').Add_Click({ $script:DStatus.Text = Import-BackupFile })
     $dlg.FindName('BtnAdd').Add_Click({
-        $txt = $input.Text.Trim()
-        if (-not $txt) { $script:DStatus.Text = 'Paste a link or a secret key first'; return }
-        $msgs = @()
-        $lines = @($txt -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-        $uris = @($lines | Where-Object { $_ -like 'otpauth://*' })
-        if ($uris.Count -gt 0) {
-            foreach ($u in $uris) { $msgs += (Add-AccountFromUri $u) }
+        $txt = [string]$script:DlgInput.Text
+        $txt = $txt.Trim()
+        if (-not $txt) { $script:DStatus.Text = 'Paste links or a secret key first'; return }
+        if ($txt -match 'otpauth://totp/') {
+            $msg = Import-OtpText $txt
         } else {
             $secret = ($txt.ToUpper() -replace '[^A-Z2-7]', '')
             if ($secret.Length -lt 8) { $script:DStatus.Text = 'That does not look like a Base32 secret key'; return }
-            $n = $nameBox.Text.Trim(); if (-not $n) { $n = 'Account' }
-            $msgs += (Add-AccountFromUri (New-OtpUri -Name $n -Secret $secret))
+            $n = ([string]$script:DlgName.Text).Trim(); if (-not $n) { $n = 'Account' }
+            $msg = Add-AccountFromUri (New-OtpUri -Name $n -Secret $secret)
         }
-        $script:DStatus.Text = ($msgs -join ' | ')
-        if ($script:DStatus.Text -like 'Added:*') { $input.Text = ''; $nameBox.Text = '' }
+        $script:DStatus.Text = $msg
+        if ($msg -like 'Added:*' -or $msg -like 'Imported*') { $script:DlgInput.Text = ''; $script:DlgName.Text = '' }
     })
     $dlg.FindName('BtnClose').Add_Click({ $script:Dlg.Close() })
     $dlg.ShowDialog() | Out-Null
@@ -470,6 +506,7 @@ $menu = New-Object System.Windows.Controls.ContextMenu
 $menuDefs = @(
     @{ h = 'Scan QR on screen';     a = { Show-Status (Scan-QrOnScreen -HideWindows @($script:Window)) } },
     @{ h = 'Add account...';        a = { Show-AddDialog } },
+    @{ h = 'Import backup file...'; a = { Show-Status (Import-BackupFile) } },
     @{ h = 'Reload accounts';       a = { Build-Rows; Show-Status "Reloaded ($($script:Accounts.Count) accounts)" } },
     @{ h = 'Open secrets folder';   a = { Start-Process explorer.exe $script:Dir } },
     'sep',
