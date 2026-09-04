@@ -278,7 +278,7 @@ if (Test-Path $script:StatePath) {
     } catch { }
 }
 function Save-State {
-    @{ left = $script:Window.Left; top = $script:Window.Top } | ConvertTo-Json | Set-Content $script:StatePath -Encoding UTF8
+    @{ left = $script:IconLeft; top = $script:IconTop } | ConvertTo-Json | Set-Content $script:StatePath -Encoding UTF8
 }
 
 function Format-Code([string]$c) {
@@ -293,13 +293,12 @@ $script:StatusTimer.Interval = [TimeSpan]::FromSeconds(4)
 $script:StatusTimer.Add_Tick({
     $script:StatusTimer.Stop()
     $script:Status.Visibility = 'Collapsed'
-    if (-not $script:Root.IsMouseOver) { $script:Panel.Visibility = 'Collapsed' }
+    if (-not $script:Root.IsMouseOver) { Collapse-Panel } else { Expand-Panel }
 })
 function Show-Status([string]$msg) {
     $script:Status.Text = $msg
     $script:Status.Visibility = 'Visible'
-    $script:Panel.Visibility = 'Visible'
-    Update-Codes
+    Expand-Panel
     $script:StatusTimer.Stop(); $script:StatusTimer.Start()
 }
 
@@ -455,24 +454,88 @@ function Show-AddDialog {
     $dlg.ShowDialog() | Out-Null
 }
 
-# hover expand / collapse
+# ---------- expand / collapse, keeping the panel on screen ----------
+# The icon's own position is kept in IconLeft/IconTop. When the panel opens and there is
+# no room to the right (or below), the window is shifted so the panel opens leftwards/upwards.
+$script:IconLeft = $script:Window.Left
+$script:IconTop  = $script:Window.Top
+$script:Expanded = $false
+
+function Get-WorkAreaDip {
+    # work area of the monitor under the icon, in WPF units (handles DPI scaling)
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+        $src = [System.Windows.PresentationSource]::FromVisual($script:Window)
+        $toDev = $src.CompositionTarget.TransformToDevice
+        $fromDev = $src.CompositionTarget.TransformFromDevice
+        $px = $toDev.Transform((New-Object System.Windows.Point ($script:IconLeft + 23), ($script:IconTop + 23)))
+        $scr = [System.Windows.Forms.Screen]::FromPoint((New-Object System.Drawing.Point ([int]$px.X), ([int]$px.Y)))
+        $wa = $scr.WorkingArea
+        $tl = $fromDev.Transform((New-Object System.Windows.Point $wa.Left, $wa.Top))
+        $br = $fromDev.Transform((New-Object System.Windows.Point $wa.Right, $wa.Bottom))
+        return @{ Left = $tl.X; Top = $tl.Y; Right = $br.X; Bottom = $br.Y }
+    } catch {
+        $wa = [System.Windows.SystemParameters]::WorkArea
+        return @{ Left = $wa.Left; Top = $wa.Top; Right = $wa.Right; Bottom = $wa.Bottom }
+    }
+}
+
+function Expand-Panel {
+    Update-Codes
+    $script:Panel.Visibility = 'Visible'
+    $script:Window.UpdateLayout()
+    $w = $script:Window.ActualWidth; $h = $script:Window.ActualHeight
+    $wa = Get-WorkAreaDip
+    $iconW = $script:Icon.ActualWidth
+    if (($script:IconLeft + $w) -gt $wa.Right -and ($script:IconLeft + $iconW - $w) -ge $wa.Left) {
+        # open to the left: keep the icon where it is, hang the panel off its right edge
+        $script:Icon.HorizontalAlignment = 'Right'
+        $script:Window.Left = $script:IconLeft + $iconW - $w
+    } else {
+        $script:Icon.HorizontalAlignment = 'Left'
+        $script:Window.Left = $script:IconLeft
+    }
+    $top = $script:IconTop
+    if (($top + $h) -gt $wa.Bottom) { $top = [Math]::Max($wa.Top, $wa.Bottom - $h) }
+    $script:Window.Top = $top
+    $script:Expanded = $true
+}
+
+function Collapse-Panel {
+    $script:Panel.Visibility = 'Collapsed'
+    $script:Icon.HorizontalAlignment = 'Left'
+    $script:Window.Left = $script:IconLeft
+    $script:Window.Top  = $script:IconTop
+    $script:Expanded = $false
+}
+
 $script:Collapse = New-Object System.Windows.Threading.DispatcherTimer
 $script:Collapse.Interval = [TimeSpan]::FromMilliseconds(450)
 $script:Collapse.Add_Tick({
     $script:Collapse.Stop()
-    if ($script:Status.Visibility -ne 'Visible') { $script:Panel.Visibility = 'Collapsed' }
+    if ($script:Status.Visibility -ne 'Visible') { Collapse-Panel }
 })
 
 $script:Root.Add_MouseEnter({
     $script:Collapse.Stop()
-    if ($script:Panel.Visibility -ne 'Visible') { Update-Codes; $script:Panel.Visibility = 'Visible' }
+    if (-not $script:Expanded) { Expand-Panel }
 })
 $script:Root.Add_MouseLeave({ $script:Collapse.Start() })
 
-# drag
+# drag (collapse first so the icon is the whole window while dragging)
 $script:Icon.Add_MouseLeftButtonDown({
+    $script:Collapse.Stop()
+    Collapse-Panel
     try { $script:Window.DragMove() } catch { }
+    # keep the icon inside the virtual screen
+    $vs = [System.Windows.SystemParameters]::VirtualScreenLeft, [System.Windows.SystemParameters]::VirtualScreenTop,
+          [System.Windows.SystemParameters]::VirtualScreenWidth, [System.Windows.SystemParameters]::VirtualScreenHeight
+    $iconW = $script:Icon.ActualWidth; $iconH = $script:Icon.ActualHeight
+    $script:IconLeft = [Math]::Min([Math]::Max($script:Window.Left, $vs[0]), $vs[0] + $vs[2] - $iconW)
+    $script:IconTop  = [Math]::Min([Math]::Max($script:Window.Top,  $vs[1]), $vs[1] + $vs[3] - $iconH)
+    $script:Window.Left = $script:IconLeft; $script:Window.Top = $script:IconTop
     Save-State
+    if ($script:Root.IsMouseOver) { Expand-Panel }
 })
 
 # ---------- Start with Windows (shortcut in the user's Startup folder) ----------
