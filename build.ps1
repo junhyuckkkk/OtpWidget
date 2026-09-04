@@ -28,4 +28,17 @@ Invoke-ps2exe -inputFile (Join-Path $root 'OtpWidget.ps1') -outputFile $out `
 
 Copy-Item (Join-Path $root 'secrets.example.txt') (Join-Path $dist 'secrets.example.txt') -Force
 Copy-Item (Join-Path $root 'README.md') (Join-Path $dist 'README.md') -Force
+
+# portable zip: exe + script version + README (zip downloads trigger far fewer browser warnings than a bare exe)
+$stage = Join-Path $env:TEMP 'OtpWidget-pkg\OtpWidget'
+Remove-Item (Split-Path $stage) -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force (Join-Path $stage 'assets') | Out-Null
+foreach ($f in 'OtpWidget.ps1', 'OtpWidget.vbs', 'README.md', 'secrets.example.txt') { Copy-Item (Join-Path $root $f) $stage }
+Copy-Item $out $stage
+Copy-Item $icon (Join-Path $stage 'assets')
+$zip = Join-Path $dist 'OtpWidget.zip'
+Remove-Item $zip -ErrorAction SilentlyContinue
+Compress-Archive -Path $stage -DestinationPath $zip
+Remove-Item (Split-Path $stage) -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "Built: $out"
+Write-Host "Packed: $zip"
