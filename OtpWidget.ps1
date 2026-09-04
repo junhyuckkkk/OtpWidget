@@ -266,10 +266,17 @@ $script:Items  = $script:Window.FindName('Items')
 $script:Status = $script:Window.FindName('Status')
 $script:Rows   = @()
 
-# position
+# position: saved spot, or (first run) the top-right of the monitor the mouse is on
 $wa = [System.Windows.SystemParameters]::WorkArea
 $script:Window.Left = $wa.Right - 320
 $script:Window.Top  = $wa.Top + 20
+try {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $scr = [System.Windows.Forms.Screen]::FromPoint([System.Windows.Forms.Cursor]::Position)
+    $scale = $wa.Width / [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea.Width   # px -> WPF units
+    $script:Window.Left = ($scr.WorkingArea.Right * $scale) - 320
+    $script:Window.Top  = ($scr.WorkingArea.Top * $scale) + 20
+} catch { }
 if (Test-Path $script:StatePath) {
     try {
         $st = Get-Content $script:StatePath -Raw | ConvertFrom-Json
