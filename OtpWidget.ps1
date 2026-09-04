@@ -439,6 +439,28 @@ $script:Icon.Add_MouseLeftButtonDown({
     Save-State
 })
 
+# ---------- Start with Windows (shortcut in the user's Startup folder) ----------
+$script:StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'OtpWidget.lnk'
+function Test-Startup { return (Test-Path $script:StartupLnk) }
+function Set-Startup([bool]$on) {
+    if (-not $on) { Remove-Item $script:StartupLnk -ErrorAction SilentlyContinue; return 'Start with Windows: off' }
+    $sh = New-Object -ComObject WScript.Shell
+    $lnk = $sh.CreateShortcut($script:StartupLnk)
+    $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    if ((Split-Path -Leaf $exe) -ieq 'powershell.exe') {
+        # running as script: launch via the vbs (no console window)
+        $lnk.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
+        $lnk.Arguments  = '"' + (Join-Path $script:Dir 'OtpWidget.vbs') + '"'
+    } else {
+        $lnk.TargetPath = $exe
+        $lnk.Arguments  = ''
+    }
+    $lnk.WorkingDirectory = $script:Dir
+    $lnk.Description = 'OtpWidget'
+    $lnk.Save()
+    return 'Start with Windows: on'
+}
+
 # context menu
 $menu = New-Object System.Windows.Controls.ContextMenu
 # NOTE: PowerShell variables are case-insensitive - do not name anything here $items (would clobber $script:Items)
@@ -448,15 +470,19 @@ $menuDefs = @(
     @{ h = 'Reload accounts';       a = { Build-Rows; Show-Status "Reloaded ($($script:Accounts.Count) accounts)" } },
     @{ h = 'Open secrets folder';   a = { Start-Process explorer.exe $script:Dir } },
     'sep',
+    @{ h = 'Start with Windows';    check = $true; a = { Show-Status (Set-Startup $this.IsChecked) } },
+    'sep',
     @{ h = 'Exit';                  a = { $script:Window.Close() } }
 )
 foreach ($def in $menuDefs) {
     if ($def -eq 'sep') { $menu.Items.Add((New-Object System.Windows.Controls.Separator)) | Out-Null; continue }
     $mi = New-Object System.Windows.Controls.MenuItem
     $mi.Header = $def.h
+    if ($def.check) { $mi.IsCheckable = $true; $script:StartupMenuItem = $mi }
     $mi.Add_Click($def.a)
     $menu.Items.Add($mi) | Out-Null
 }
+$menu.Add_Opened({ $script:StartupMenuItem.IsChecked = (Test-Startup) })
 $script:Icon.ContextMenu = $menu
 
 # tick

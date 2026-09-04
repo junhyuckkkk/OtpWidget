@@ -48,7 +48,7 @@ QR을 캡처(Win+Shift+S)해 둔 경우엔 **Add account… → QR from clipboar
 `secrets.example.txt`를 `secrets.txt`로 이름 바꿔 시작해도 됩니다.
 
 ## 윈도우 시작 시 자동 실행
-`Win + R` → `shell:startup` 으로 열리는 폴더에 `OtpWidget.exe`(또는 `OtpWidget.vbs`)의 바로가기를 넣으면 됩니다.
+아이콘 **우클릭 → Start with Windows** 체크. 시작프로그램 폴더(`shell:startup`)에 바로가기가 생기고, 체크를 풀면 삭제됩니다.
 
 ## 파일 구성
 | 파일 | 설명 |
@@ -83,6 +83,7 @@ A tiny always-on-top TOTP widget for Windows, written as a single PowerShell + W
 - Countdown bar per account
 - Add accounts by **scanning a QR code that is visible on screen** (right-click → *Scan QR on screen*), from a clipboard image, or by pasting an `otpauth://` link / secret key
 - Bulk import: paste exported `otpauth://` lines (e.g. from the Authenticator browser extension) into `secrets.txt`
+- Right-click → *Start with Windows* to toggle autostart
 
 **Run:** download `OtpWidget.exe` from Releases, or clone and double-click `OtpWidget.vbs`. No install, no admin.
 Secrets are stored in plain text in `secrets.txt` next to the executable; keep that folder private.
