@@ -598,16 +598,24 @@ function Get-StartupCommand {
 }
 $script:TaskName = 'OtpWidget'
 function Test-Startup {
-    if (Get-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue) { return $true }
+    # Get-ScheduledTask takes several seconds; the task's XML file existing is an instant equivalent
+    if (Test-Path (Join-Path $env:WINDIR ('System32\Tasks\' + $script:TaskName))) { return $true }
     $v = (Get-ItemProperty -Path $script:RunKey -Name $script:RunName -ErrorAction SilentlyContinue).$script:RunName
     return ([bool]$v -or (Test-Path $script:StartupLnk))
 }
 function Set-Startup([bool]$on) {
-    # clear every older mechanism first (Startup-folder shortcut, Run key) so only one launcher exists
+    # the Task Scheduler cmdlets take a few seconds - show feedback before starting
+    Show-Status '자동 실행 설정 변경 중...'
+    $script:Window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
+    # clear every older mechanism first (Startup-folder shortcut, Run key, task) so nothing stale is left
     Remove-Item $script:StartupLnk -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $script:RunKey -Name $script:RunName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $script:TaskName -Confirm:$false -ErrorAction SilentlyContinue
     if (-not $on) { return '윈도우 시작 시 자동 실행: 꺼짐' }
+    # always also set the Run key: if the task ever gets deleted the widget still starts (a bit later);
+    # a second launch exits immediately thanks to the single-instance mutex
+    New-Item -Path $script:RunKey -Force | Out-Null
+    Set-ItemProperty -Path $script:RunKey -Name $script:RunName -Value (Get-StartupCommand)
     # preferred: a logon task in Task Scheduler - starts right at logon, before Explorer's startup-app delay
     try {
         $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
@@ -621,9 +629,7 @@ function Set-Startup([bool]$on) {
         Register-ScheduledTask -TaskName $script:TaskName -Action $action -Trigger $trigger -Settings $settings -Force -ErrorAction Stop | Out-Null
         return '윈도우 시작 시 자동 실행: 켜짐 (로그인 즉시)'
     } catch {
-        # fallback: HKCU Run key (works everywhere, starts a little later)
-        New-Item -Path $script:RunKey -Force | Out-Null
-        Set-ItemProperty -Path $script:RunKey -Name $script:RunName -Value (Get-StartupCommand)
+        # task registration not allowed on this PC: the Run key set above still starts the widget at logon
         return '윈도우 시작 시 자동 실행: 켜짐'
     }
 }
