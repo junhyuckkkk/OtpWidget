@@ -16,7 +16,7 @@ A tiny always-on-top desktop TOTP widget for Windows. Hover to expand, click a c
 - 남은 시간 바 (5초 이하면 빨간색)
 - **QR 코드 등록**: 화면에 QR이 보이는 상태에서 우클릭 → *화면의 QR 코드 스캔* 하면 바로 추가
 - otpauth 링크 / 시크릿 키 직접 붙여넣기도 가능
-- 드래그로 위치 이동 (위치 기억), 윈도우 시작 시 자동 실행 가능
+- 드래그로 위치 이동 (위치 기억), 중복 실행 방지 (두 번 눌러도 하나만 뜸)
 
 ## 설치 & 실행
 
@@ -53,8 +53,8 @@ QR을 캡처(Win+Shift+S)해 둔 경우엔 **계정 추가… → 클립보드 �
 
 `secrets.txt`를 직접 편집했다면 우클릭 → **새로고침**.
 
-## 윈도우 시작 시 자동 실행
-아이콘 **우클릭 → 윈도우 시작 시 자동 실행** 체크. Windows 작업 스케줄러에 "로그인 시" 작업으로 등록되어 로그인 직후 바로 실행됩니다 (시작프로그램 폴더보다 빠름). 체크를 풀면 해제됩니다. 작업 스케줄러에서 `OtpWidget` 작업으로 확인할 수 있고, 등록이 안 되는 PC에서는 레지스트리 시작 항목으로 자동 대체됩니다. 위젯은 한 번에 하나만 실행되며, 이미 떠 있는 상태에서 다시 실행하면 새로 열리지 않습니다.
+## 실행 습관
+자동 실행 기능은 일부러 넣지 않았습니다. 백신·보안 프로그램이 많은 회사 PC에서는 로그인 시 자동 실행이 몇 분씩 밀려서, 로그인 직후 직접 켜는 편이 빠릅니다. `OtpWidget.exe`를 작업 표시줄에 고정해 두면 클릭 한 번으로 뜹니다. 위젯은 한 번에 하나만 실행되며, 이미 떠 있는 상태에서 다시 눌러도 새로 열리지 않습니다.
 
 ## 파일 구성
 | 파일 | 설명 |
@@ -66,7 +66,7 @@ QR을 캡처(Win+Shift+S)해 둔 경우엔 **계정 추가… → 클립보드 �
 | `%APPDATA%\OtpWidget\state.json` | 위젯 위치 (자동 생성) |
 | `%APPDATA%\OtpWidget\lib\zxing.dll` | QR 디코더. 첫 QR 스캔 때 [ZXing.Net](https://github.com/micjahn/ZXing.Net) (NuGet)에서 자동 다운로드 |
 
-`%APPDATA%\OtpWidget`은 탐색기 주소창에 그대로 붙여넣으면 열립니다. 같은 폴더의 `startup.log`에 실행/종료 기록이 남으니 "자동 실행이 안 된다" 싶을 때 먼저 열어보세요. 예전 버전처럼 exe 옆에 `secrets.txt`가 있으면 첫 실행 때 자동으로 옮겨옵니다.
+`%APPDATA%\OtpWidget`은 탐색기 주소창에 그대로 붙여넣으면 열립니다. 같은 폴더의 `startup.log`에 실행/종료 기록이 남습니다. 예전 버전처럼 exe 옆에 `secrets.txt`가 있으면 첫 실행 때 자동으로 옮겨옵니다.
 | `build.ps1` | `dist\OtpWidget.exe` 빌드 (ps2exe 사용) |
 
 ## 보안 주의
@@ -91,7 +91,7 @@ A tiny always-on-top TOTP widget for Windows, written as a single PowerShell + W
 - Countdown bar per account
 - Add accounts by **scanning a QR code that is visible on screen** (right-click → *Scan QR on screen*), from a clipboard image, or by pasting an `otpauth://` link / secret key
 - Bulk import: paste exported `otpauth://` lines (e.g. from the Authenticator browser extension) into `secrets.txt`
-- Right-click → *Start with Windows* to toggle autostart
+- No autostart by design (on locked-down PCs logon launches get delayed for minutes); pin the exe to the taskbar instead. Single instance.
 
 **Run:** [download `OtpWidget.zip`](https://github.com/junhyuckkkk/OtpWidget/raw/main/dist/OtpWidget.zip), unzip, run `OtpWidget.exe` (or `OtpWidget.vbs` for the script version). No install, no admin.
 Secrets are stored in plain text in `secrets.txt` next to the executable; keep that folder private.

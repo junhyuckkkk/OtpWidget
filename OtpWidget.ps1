@@ -584,57 +584,8 @@ $script:Icon.Add_MouseLeftButtonDown({
     if ($script:Root.IsMouseOver) { Expand-Panel }
 })
 
-# ---------- Start with Windows (HKCU Run registry key; the copy that turned it on is what starts) ----------
-$script:RunKey     = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$script:RunName    = 'OtpWidget'
-$script:StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup')) 'OtpWidget.lnk'   # legacy location
-function Get-StartupCommand {
-    $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
-    if ((Split-Path -Leaf $exe) -ieq 'powershell.exe') {
-        # running as script: launch via the vbs (no console window)
-        return '"' + (Join-Path $env:WINDIR 'System32\wscript.exe') + '" "' + (Join-Path $script:Dir 'OtpWidget.vbs') + '"'
-    }
-    return '"' + $exe + '"'
-}
-$script:TaskName = 'OtpWidget'
-function Test-Startup {
-    # Get-ScheduledTask takes several seconds; the task's XML file existing is an instant equivalent
-    if (Test-Path (Join-Path $env:WINDIR ('System32\Tasks\' + $script:TaskName))) { return $true }
-    $v = (Get-ItemProperty -Path $script:RunKey -Name $script:RunName -ErrorAction SilentlyContinue).$script:RunName
-    return ([bool]$v -or (Test-Path $script:StartupLnk))
-}
-function Set-Startup([bool]$on) {
-    # the Task Scheduler cmdlets take a few seconds - show feedback before starting
-    Show-Status '자동 실행 설정 변경 중...'
-    $script:Window.Dispatcher.Invoke([action]{}, [System.Windows.Threading.DispatcherPriority]::Render)
-    # clear every older mechanism first (Startup-folder shortcut, Run key, task) so nothing stale is left
-    Remove-Item $script:StartupLnk -ErrorAction SilentlyContinue
-    Remove-ItemProperty -Path $script:RunKey -Name $script:RunName -ErrorAction SilentlyContinue
-    Unregister-ScheduledTask -TaskName $script:TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    if (-not $on) { return '윈도우 시작 시 자동 실행: 꺼짐' }
-    # always also set the Run key: if the task ever gets deleted the widget still starts (a bit later);
-    # a second launch exits immediately thanks to the single-instance mutex
-    New-Item -Path $script:RunKey -Force | Out-Null
-    Set-ItemProperty -Path $script:RunKey -Name $script:RunName -Value (Get-StartupCommand)
-    # preferred: a logon task in Task Scheduler - starts right at logon, before Explorer's startup-app delay
-    try {
-        $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
-        if ((Split-Path -Leaf $exe) -ieq 'powershell.exe') {
-            $action = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR 'System32\wscript.exe') -Argument ('"' + (Join-Path $script:Dir 'OtpWidget.vbs') + '"')
-        } else {
-            $action = New-ScheduledTaskAction -Execute $exe
-        }
-        $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-        $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Priority 4
-        Register-ScheduledTask -TaskName $script:TaskName -Action $action -Trigger $trigger -Settings $settings -Force -ErrorAction Stop | Out-Null
-        return '윈도우 시작 시 자동 실행: 켜짐 (로그인 즉시)'
-    } catch {
-        # task registration not allowed on this PC: the Run key set above still starts the widget at logon
-        return '윈도우 시작 시 자동 실행: 켜짐'
-    }
-}
-
-# context menu
+# context menu (no autostart option on purpose: on locked-down PCs logon-time launches get delayed
+# for minutes by security agents, so users start the widget themselves - e.g. a taskbar pin)
 $menu = New-Object System.Windows.Controls.ContextMenu
 # NOTE: PowerShell variables are case-insensitive - do not name anything here $items (would clobber $script:Items)
 $menuDefs = @(
@@ -643,19 +594,15 @@ $menuDefs = @(
     @{ h = '백업 파일 가져오기...';       a = { Show-Status (Import-BackupFile) } },
     @{ h = '새로고침';                  a = { Build-Rows; Show-Status "새로고침 완료 ($($script:Accounts.Count)개 계정)" } },
     'sep',
-    @{ h = '윈도우 시작 시 자동 실행';    check = $true; a = { Show-Status (Set-Startup $this.IsChecked) } },
-    'sep',
     @{ h = '종료';                      a = { $script:Window.Close() } }
 )
 foreach ($def in $menuDefs) {
     if ($def -eq 'sep') { $menu.Items.Add((New-Object System.Windows.Controls.Separator)) | Out-Null; continue }
     $mi = New-Object System.Windows.Controls.MenuItem
     $mi.Header = $def.h
-    if ($def.check) { $mi.IsCheckable = $true; $script:StartupMenuItem = $mi }
     $mi.Add_Click($def.a)
     $menu.Items.Add($mi) | Out-Null
 }
-$menu.Add_Opened({ $script:StartupMenuItem.IsChecked = (Test-Startup) })
 $script:Icon.ContextMenu = $menu
 
 # tick
