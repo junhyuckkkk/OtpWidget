@@ -31,7 +31,13 @@ Write-Log ("start  exe=" + [System.Diagnostics.Process]::GetCurrentProcess().Mai
 
 # single instance: a second launch just exits (the first one keeps running)
 $script:Mutex = New-Object System.Threading.Mutex($false, 'Local\OtpWidget-single-instance')
-if (-not $script:Mutex.WaitOne(0, $false)) { Write-Log 'exit: another instance is already running'; exit }
+if (-not $script:Mutex.WaitOne(0, $false)) {
+    # tell the running instance to bring its window back on screen (it may be lost after sleep / monitor changes)
+    try { [System.Threading.EventWaitHandle]::OpenExisting('Local\OtpWidget-show').Set() | Out-Null } catch { }
+    Write-Log 'exit: another instance is already running (asked it to show itself)'
+    exit
+}
+$script:ShowEvent = New-Object System.Threading.EventWaitHandle($false, [System.Threading.EventResetMode]::AutoReset, 'Local\OtpWidget-show')
 
 # WPF hardware rendering makes some graphics drivers (seen with Intel) reserve ~1 GB per window.
 # The widget is tiny, so software rendering is more than enough and keeps memory near 100 MB.
@@ -605,10 +611,47 @@ foreach ($def in $menuDefs) {
 }
 $script:Icon.ContextMenu = $menu
 
-# tick
+# ---------- keep the widget visible across sleep / monitor changes ----------
+function Get-VirtualScreenKey {
+    return "$([System.Windows.SystemParameters]::VirtualScreenLeft),$([System.Windows.SystemParameters]::VirtualScreenTop),$([System.Windows.SystemParameters]::VirtualScreenWidth),$([System.Windows.SystemParameters]::VirtualScreenHeight)"
+}
+function Ensure-OnScreen([string]$reason) {
+    try {
+        $vsL = [System.Windows.SystemParameters]::VirtualScreenLeft; $vsT = [System.Windows.SystemParameters]::VirtualScreenTop
+        $vsR = $vsL + [System.Windows.SystemParameters]::VirtualScreenWidth; $vsB = $vsT + [System.Windows.SystemParameters]::VirtualScreenHeight
+        $cx = $script:IconLeft + 23; $cy = $script:IconTop + 23
+        $moved = $false
+        if ($cx -lt $vsL -or $cx -gt $vsR -or $cy -lt $vsT -or $cy -gt $vsB) {
+            $wa = [System.Windows.SystemParameters]::WorkArea
+            $script:IconLeft = $wa.Right - 320; $script:IconTop = $wa.Top + 20
+            Save-State; $moved = $true
+        }
+        if (-not $script:Window.IsVisible) { $script:Window.Show() }
+        if ($script:Window.WindowState -ne 'Normal') { $script:Window.WindowState = 'Normal' }
+        Collapse-Panel
+        $script:Window.Topmost = $false; $script:Window.Topmost = $true
+        Write-Log ("ensure-on-screen ($reason): pos=" + [int]$script:IconLeft + "," + [int]$script:IconTop + " moved=" + $moved)
+        return $moved
+    } catch { Write-Log ("ensure-on-screen failed: " + $_.Exception.Message); return $false }
+}
+
+# tick: refresh codes, and watch for "show yourself" requests, monitor changes and wake-from-sleep
+$script:LastVS = Get-VirtualScreenKey
+$script:LastTick = Get-Date
 $script:Timer = New-Object System.Windows.Threading.DispatcherTimer
 $script:Timer.Interval = [TimeSpan]::FromSeconds(1)
-$script:Timer.Add_Tick({ if ($script:Panel.Visibility -eq 'Visible') { Update-Codes } })
+$script:Timer.Add_Tick({
+    $now = Get-Date
+    if ($script:ShowEvent.WaitOne(0)) {
+        $moved = Ensure-OnScreen 'second launch'
+        if ($moved) { Show-Status '이미 실행 중이어서 위젯을 화면 안으로 옮겼습니다.' } else { Show-Status '이미 실행 중입니다. 여기 있어요!' }
+    }
+    $vs = Get-VirtualScreenKey
+    if ($vs -ne $script:LastVS) { $script:LastVS = $vs; Ensure-OnScreen "display changed to $vs" | Out-Null }
+    if (($now - $script:LastTick).TotalSeconds -gt 30) { Ensure-OnScreen 'resume from sleep' | Out-Null }
+    $script:LastTick = $now
+    if ($script:Panel.Visibility -eq 'Visible') { Update-Codes }
+})
 $script:Timer.Start()
 
 Build-Rows
