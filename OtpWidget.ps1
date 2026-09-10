@@ -265,28 +265,37 @@ function Scan-QrFromClipboard {
 }
 
 # ---------- Paste queue ----------
-# Click several accounts -> each Ctrl+V pastes the next code. Windows has no "paste happened" event, so a
-# low-level keyboard hook watches for Ctrl+V; it is only installed while the queue is non-empty.
-Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
+# Click several accounts -> each paste (Ctrl+V or Shift+Insert) gets the next code.
+# Windows has no "paste happened" event, so a low-level keyboard hook watches for the paste shortcuts.
+# The hook runs on its own thread with its own message loop: if it lived on the UI thread, any moment the
+# widget is busy (>300 ms) would make Windows silently drop the hook - which is what made pastes stop rotating.
+# The hook is only installed while a queue of 2+ codes is active.
+Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
+using System.Threading;
 public static class PasteQueue {
-    public static List<string> Codes = new List<string>();
-    public static int Version = 0;
-    public static bool ClipboardStale = false;   // set when the clipboard could not be updated right after a paste
+    static readonly object _lock = new object();
+    static List<string> _codes = new List<string>();
+    public static volatile int Version = 0;          // +1 per consumed code
+    public static volatile bool ClipboardStale = false;
     public static string LastError = "";
-    static Timer _delay;                          // rotate ~150 ms after Ctrl+V so the target app has read the clipboard first
-    const int WH_KEYBOARD_LL = 13, WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
-    const int VK_V = 0x56, VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3;
+    const int WH_KEYBOARD_LL = 13, WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105, WM_QUIT = 0x0012;
+    const int VK_V = 0x56, VK_INSERT = 0x2D, VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3, VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1;
     delegate IntPtr LowLevelProc(int nCode, IntPtr wParam, IntPtr lParam);
     static LowLevelProc _proc = HookCallback;
-    static IntPtr _hook = IntPtr.Zero;
-    static bool _ctrl = false, _pending = false;
+    static IntPtr _hook = IntPtr.Zero; static Thread _thread; static uint _threadId;
+    static bool _ctrl, _shift, _pending; static Timer _rot;
+    [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam; public IntPtr lParam; public uint time; public int ptX; public int ptY; }
     [DllImport("user32.dll")] static extern IntPtr SetWindowsHookEx(int id, LowLevelProc cb, IntPtr hMod, uint tid);
     [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr h);
     [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr h, int n, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] static extern int GetMessage(out MSG msg, IntPtr hWnd, uint min, uint max);
+    [DllImport("user32.dll")] static extern bool TranslateMessage(ref MSG msg);
+    [DllImport("user32.dll")] static extern IntPtr DispatchMessage(ref MSG msg);
+    [DllImport("user32.dll")] static extern bool PostThreadMessage(uint tid, uint msg, IntPtr w, IntPtr l);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] static extern bool OpenClipboard(IntPtr h);
     [DllImport("user32.dll")] static extern bool CloseClipboard();
     [DllImport("user32.dll")] static extern bool EmptyClipboard();
@@ -295,50 +304,66 @@ public static class PasteQueue {
     [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr h);
     [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr h);
     [DllImport("kernel32.dll")] static extern IntPtr GlobalFree(IntPtr h);
-    // plain Win32 clipboard write (the WinForms/OLE clipboard misbehaves when called from a timer callback here)
-    static bool SetClipText(string s) {
+    // plain Win32 clipboard write with retries (works from any thread; the OLE clipboard misbehaved here)
+    public static bool SetText(string s) {
         for (int i = 0; i < 20; i++) {
             if (OpenClipboard(IntPtr.Zero)) {
                 try {
                     EmptyClipboard();
-                    IntPtr h = GlobalAlloc(0x0042, (UIntPtr)((s.Length + 1) * 2));   // GMEM_MOVEABLE | GMEM_ZEROINIT
-                    IntPtr p = GlobalLock(h);
-                    Marshal.Copy(s.ToCharArray(), 0, p, s.Length);
-                    GlobalUnlock(h);
-                    if (SetClipboardData(13, h) == IntPtr.Zero) { GlobalFree(h); return false; }   // CF_UNICODETEXT
+                    IntPtr h = GlobalAlloc(0x0042, (UIntPtr)((s.Length + 1) * 2));
+                    IntPtr p = GlobalLock(h); Marshal.Copy(s.ToCharArray(), 0, p, s.Length); GlobalUnlock(h);
+                    if (SetClipboardData(13, h) == IntPtr.Zero) { GlobalFree(h); return false; }
                     return true;
                 } finally { CloseClipboard(); }
             }
-            System.Threading.Thread.Sleep(25);
+            Thread.Sleep(25);
         }
-        return false;
+        LastError = "clipboard busy"; return false;
     }
-    public static bool Installed { get { return _hook != IntPtr.Zero; } }
+    public static void SetCodes(string[] codes) { lock (_lock) { _codes.Clear(); _codes.AddRange(codes); } }
+    public static int Count { get { lock (_lock) { return _codes.Count; } } }
+    public static string Head { get { lock (_lock) { return _codes.Count > 0 ? _codes[0] : null; } } }
+    public static bool Installed { get { return _thread != null; } }
     public static void Install() {
-        if (_delay == null) { _delay = new Timer(); _delay.Interval = 150; _delay.Tick += delegate { _delay.Stop(); Advance(); }; }
-        if (_hook == IntPtr.Zero) { _ctrl = false; _pending = false; _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, IntPtr.Zero, 0); }
+        if (_thread != null) return;
+        _ctrl = false; _shift = false; _pending = false;
+        _thread = new Thread(Loop); _thread.IsBackground = true; _thread.Name = "OtpWidget paste hook";
+        _thread.SetApartmentState(ApartmentState.STA); _thread.Start();
     }
-    public static void Uninstall() { if (_hook != IntPtr.Zero) { UnhookWindowsHookEx(_hook); _hook = IntPtr.Zero; } if (_delay != null) _delay.Stop(); }
-    public static bool SetText(string s) { return SetClipText(s); }
-    public static void SimulatePaste() { Advance(); }
-    public static void TriggerDelayed() { if (_delay != null) { _delay.Stop(); _delay.Start(); } }
-    static void Advance() {
-        if (Codes.Count == 0) return;
-        Codes.RemoveAt(0); Version++;
-        if (Codes.Count > 0) {
-            // the pasting app may still hold the clipboard open for a moment: retry, then let the widget's timer fix it
-            try { ClipboardStale = !SetClipText(Codes[0]); if (ClipboardStale) LastError = "clipboard busy"; }
-            catch (Exception ex) { ClipboardStale = true; LastError = ex.Message; }
+    public static void Uninstall() {
+        Thread t = _thread; if (t == null) return;
+        _thread = null; PostThreadMessage(_threadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+    }
+    static void Loop() {
+        _threadId = GetCurrentThreadId();
+        _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, IntPtr.Zero, 0);
+        if (_hook == IntPtr.Zero) { LastError = "hook failed: " + Marshal.GetLastWin32Error(); _thread = null; return; }
+        MSG msg;
+        while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) { TranslateMessage(ref msg); DispatchMessage(ref msg); }
+        UnhookWindowsHookEx(_hook); _hook = IntPtr.Zero;
+    }
+    public static void SimulatePaste() { Advance(null); }
+    static void Advance(object state) {
+        string next = null;
+        lock (_lock) {
+            if (_codes.Count == 0) return;
+            _codes.RemoveAt(0); Version++;
+            if (_codes.Count > 0) next = _codes[0];
         }
+        if (next != null) { try { ClipboardStale = !SetText(next); } catch (Exception ex) { ClipboardStale = true; LastError = ex.Message; } }
     }
     static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
         if (nCode >= 0) {
             int msg = (int)wParam; int vk = Marshal.ReadInt32(lParam);
             bool down = (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN), up = (msg == WM_KEYUP || msg == WM_SYSKEYUP);
             if (vk == VK_LCONTROL || vk == VK_RCONTROL) { if (down) _ctrl = true; if (up) _ctrl = false; }
-            else if (vk == VK_V) {
-                if (down && _ctrl && Codes.Count > 0) _pending = true;   // the app reads the clipboard on key-down
-                if (up && _pending) { _pending = false; _delay.Stop(); _delay.Start(); }   // rotate shortly after the paste
+            else if (vk == VK_LSHIFT || vk == VK_RSHIFT) { if (down) _shift = true; if (up) _shift = false; }
+            else if ((vk == VK_V && _ctrl) || (vk == VK_INSERT && _shift)) {
+                if (down && Count > 0) _pending = true;          // the app reads the clipboard while handling key-down
+                if (up && _pending) {                             // rotate shortly after the paste has happened
+                    _pending = false;
+                    if (_rot == null) _rot = new Timer(Advance, null, 150, Timeout.Infinite); else _rot.Change(150, Timeout.Infinite);
+                }
             }
         }
         return CallNextHookEx(_hook, nCode, wParam, lParam);
@@ -347,18 +372,21 @@ public static class PasteQueue {
 '@
 $script:Queue = @()          # account objects, in paste order
 $script:QueueTouched = Get-Date
+$script:QueueVersion = 0
 
 function Get-QueueCodes {
-    return @($script:Queue | ForEach-Object { Get-Totp -Key $_.key -Digits $_.digits -Period $_.period })
+    # NOTE: the leading comma keeps a 1-element result an array; PowerShell would otherwise unroll it into a
+    # plain string and "[0]" would return the first *character* of the code
+    $arr = @($script:Queue | ForEach-Object { Get-Totp -Key $_.key -Digits $_.digits -Period $_.period })
+    return ,[string[]]$arr
 }
 function Sync-QueueCodes {
-    # keep the C# side (and the clipboard head) fresh: TOTP codes rotate every 30 s
-    $codes = Get-QueueCodes
-    $oldHead = $null; if ([PasteQueue]::Codes.Count -gt 0) { $oldHead = [PasteQueue]::Codes[0] }
-    $headChanged = ($codes.Count -gt 0 -and ($null -eq $oldHead -or $oldHead -ne $codes[0]))
-    [PasteQueue]::Codes.Clear(); foreach ($c in $codes) { [PasteQueue]::Codes.Add($c) }
-    if ($headChanged -or [PasteQueue]::ClipboardStale) {
-        # only overwrite the clipboard if it still holds our previous code (never clobber something the user copied)
+    # codes rotate every 30 s: refresh the list, and the clipboard too if it still holds our previous head code
+    [string[]]$codes = Get-QueueCodes
+    $oldHead = [PasteQueue]::Head
+    [PasteQueue]::SetCodes([string[]]$codes)
+    if ($codes.Count -eq 0) { return }
+    if ($oldHead -ne $codes[0] -or [PasteQueue]::ClipboardStale) {
         $current = $null; try { $current = [System.Windows.Clipboard]::GetText() } catch { }
         if ($null -eq $oldHead -or $current -eq $oldHead -or [PasteQueue]::ClipboardStale) {
             if ([PasteQueue]::SetText($codes[0])) { [PasteQueue]::ClipboardStale = $false }
@@ -372,34 +400,36 @@ function Get-QueueText {
 function Add-ToQueue($acct) {
     $script:Queue += $acct
     $script:QueueTouched = Get-Date
-    Sync-QueueCodes
     if ($script:Queue.Count -eq 1) {
-        # a single click is a plain copy - no keyboard hook, exactly like a normal clipboard copy
-        [PasteQueue]::Uninstall()
-        [PasteQueue]::SetText([PasteQueue]::Codes[0]) | Out-Null
+        # a single click is a plain copy, exactly like before (no keyboard hook)
+        [PasteQueue]::Uninstall(); [PasteQueue]::SetCodes([string[]]@())
+        [string[]]$codes = Get-QueueCodes
+        [PasteQueue]::SetText($codes[0]) | Out-Null
         return '복사됨!'
     }
-    # second click onwards: sequential mode - each Ctrl+V pastes the next code (clipboard = first queued code)
-    if (-not [PasteQueue]::Installed) { [PasteQueue]::Install(); [PasteQueue]::SetText([PasteQueue]::Codes[0]) | Out-Null }
+    # second click onwards: sequential mode - clipboard = first queued code, hook watches for pastes
+    $script:QueueVersion = [PasteQueue]::Version
+    [string[]]$codes = Get-QueueCodes
+    [PasteQueue]::SetCodes($codes)
+    [PasteQueue]::SetText([PasteQueue]::Head) | Out-Null
+    [PasteQueue]::Install()
     Show-Status (Get-QueueText)
     return "$($script:Queue.Count)번째"
 }
 function Clear-Queue([string]$why) {
-    $script:Queue = @(); [PasteQueue]::Codes.Clear(); [PasteQueue]::Uninstall()
+    $script:Queue = @(); [PasteQueue]::SetCodes([string[]]@()); [PasteQueue]::Uninstall()
     $script:QueueVersion = [PasteQueue]::Version
     if ($why) { Show-Status $why }
 }
-$script:QueueVersion = [PasteQueue]::Version
 function Tick-Queue {
     if ($script:Queue.Count -eq 0) { if ([PasteQueue]::Installed) { [PasteQueue]::Uninstall() }; return }
     if ($script:Queue.Count -eq 1 -and -not [PasteQueue]::Installed) {
         # plain-copy state: remember the click for 2 minutes (so a second click can start sequential mode), never touch the clipboard
-        if (((Get-Date) - $script:QueueTouched).TotalSeconds -gt 120) { $script:Queue = @(); [PasteQueue]::Codes.Clear() }
+        if (((Get-Date) - $script:QueueTouched).TotalSeconds -gt 120) { $script:Queue = @() }
         return
     }
     $v = [PasteQueue]::Version
     if ($v -ne $script:QueueVersion) {
-        # the hook consumed (v - QueueVersion) codes
         $consumed = [Math]::Min($v - $script:QueueVersion, $script:Queue.Count)
         $script:QueueVersion = $v
         if ($consumed -ge $script:Queue.Count) { Clear-Queue '붙여넣기 완료'; return }
