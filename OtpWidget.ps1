@@ -319,6 +319,7 @@ public static class PasteQueue {
         if (_hook == IntPtr.Zero) { _ctrl = false; _pending = false; _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, IntPtr.Zero, 0); }
     }
     public static void Uninstall() { if (_hook != IntPtr.Zero) { UnhookWindowsHookEx(_hook); _hook = IntPtr.Zero; } if (_delay != null) _delay.Stop(); }
+    public static bool SetText(string s) { return SetClipText(s); }
     public static void SimulatePaste() { Advance(); }
     public static void TriggerDelayed() { if (_delay != null) { _delay.Stop(); _delay.Start(); } }
     static void Advance() {
@@ -353,10 +354,15 @@ function Get-QueueCodes {
 function Sync-QueueCodes {
     # keep the C# side (and the clipboard head) fresh: TOTP codes rotate every 30 s
     $codes = Get-QueueCodes
-    $headChanged = ($codes.Count -gt 0 -and ([PasteQueue]::Codes.Count -eq 0 -or [PasteQueue]::Codes[0] -ne $codes[0]))
+    $oldHead = $null; if ([PasteQueue]::Codes.Count -gt 0) { $oldHead = [PasteQueue]::Codes[0] }
+    $headChanged = ($codes.Count -gt 0 -and ($null -eq $oldHead -or $oldHead -ne $codes[0]))
     [PasteQueue]::Codes.Clear(); foreach ($c in $codes) { [PasteQueue]::Codes.Add($c) }
     if ($headChanged -or [PasteQueue]::ClipboardStale) {
-        try { [System.Windows.Clipboard]::SetText($codes[0]); [PasteQueue]::ClipboardStale = $false } catch { }
+        # only overwrite the clipboard if it still holds our previous code (never clobber something the user copied)
+        $current = $null; try { $current = [System.Windows.Clipboard]::GetText() } catch { }
+        if ($null -eq $oldHead -or $current -eq $oldHead -or [PasteQueue]::ClipboardStale) {
+            if ([PasteQueue]::SetText($codes[0])) { [PasteQueue]::ClipboardStale = $false }
+        }
     }
 }
 function Get-QueueText {
@@ -368,11 +374,13 @@ function Add-ToQueue($acct) {
     $script:QueueTouched = Get-Date
     Sync-QueueCodes
     if ($script:Queue.Count -eq 1) {
-        [PasteQueue]::Uninstall(); [PasteQueue]::Install()
-        try { [System.Windows.Clipboard]::SetText([PasteQueue]::Codes[0]) } catch { }
+        # a single click is a plain copy - no keyboard hook, exactly like a normal clipboard copy
+        [PasteQueue]::Uninstall()
+        [PasteQueue]::SetText([PasteQueue]::Codes[0]) | Out-Null
         return '복사됨!'
     }
-    if (-not [PasteQueue]::Installed) { [PasteQueue]::Install() }
+    # second click onwards: sequential mode - each Ctrl+V pastes the next code (clipboard = first queued code)
+    if (-not [PasteQueue]::Installed) { [PasteQueue]::Install(); [PasteQueue]::SetText([PasteQueue]::Codes[0]) | Out-Null }
     Show-Status (Get-QueueText)
     return "$($script:Queue.Count)번째"
 }
@@ -384,6 +392,11 @@ function Clear-Queue([string]$why) {
 $script:QueueVersion = [PasteQueue]::Version
 function Tick-Queue {
     if ($script:Queue.Count -eq 0) { if ([PasteQueue]::Installed) { [PasteQueue]::Uninstall() }; return }
+    if ($script:Queue.Count -eq 1 -and -not [PasteQueue]::Installed) {
+        # plain-copy state: remember the click for 2 minutes (so a second click can start sequential mode), never touch the clipboard
+        if (((Get-Date) - $script:QueueTouched).TotalSeconds -gt 120) { $script:Queue = @(); [PasteQueue]::Codes.Clear() }
+        return
+    }
     $v = [PasteQueue]::Version
     if ($v -ne $script:QueueVersion) {
         # the hook consumed (v - QueueVersion) codes
