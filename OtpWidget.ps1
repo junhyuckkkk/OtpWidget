@@ -264,6 +264,141 @@ function Scan-QrFromClipboard {
     return (Import-QrTexts $texts)
 }
 
+# ---------- Paste queue ----------
+# Click several accounts -> each Ctrl+V pastes the next code. Windows has no "paste happened" event, so a
+# low-level keyboard hook watches for Ctrl+V; it is only installed while the queue is non-empty.
+Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+public static class PasteQueue {
+    public static List<string> Codes = new List<string>();
+    public static int Version = 0;
+    public static bool ClipboardStale = false;   // set when the clipboard could not be updated right after a paste
+    public static string LastError = "";
+    static Timer _delay;                          // rotate ~150 ms after Ctrl+V so the target app has read the clipboard first
+    const int WH_KEYBOARD_LL = 13, WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
+    const int VK_V = 0x56, VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3;
+    delegate IntPtr LowLevelProc(int nCode, IntPtr wParam, IntPtr lParam);
+    static LowLevelProc _proc = HookCallback;
+    static IntPtr _hook = IntPtr.Zero;
+    static bool _ctrl = false, _pending = false;
+    [DllImport("user32.dll")] static extern IntPtr SetWindowsHookEx(int id, LowLevelProc cb, IntPtr hMod, uint tid);
+    [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr h);
+    [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr h, int n, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] static extern bool OpenClipboard(IntPtr h);
+    [DllImport("user32.dll")] static extern bool CloseClipboard();
+    [DllImport("user32.dll")] static extern bool EmptyClipboard();
+    [DllImport("user32.dll")] static extern IntPtr SetClipboardData(uint fmt, IntPtr h);
+    [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
+    [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr h);
+    [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr h);
+    [DllImport("kernel32.dll")] static extern IntPtr GlobalFree(IntPtr h);
+    // plain Win32 clipboard write (the WinForms/OLE clipboard misbehaves when called from a timer callback here)
+    static bool SetClipText(string s) {
+        for (int i = 0; i < 20; i++) {
+            if (OpenClipboard(IntPtr.Zero)) {
+                try {
+                    EmptyClipboard();
+                    IntPtr h = GlobalAlloc(0x0042, (UIntPtr)((s.Length + 1) * 2));   // GMEM_MOVEABLE | GMEM_ZEROINIT
+                    IntPtr p = GlobalLock(h);
+                    Marshal.Copy(s.ToCharArray(), 0, p, s.Length);
+                    GlobalUnlock(h);
+                    if (SetClipboardData(13, h) == IntPtr.Zero) { GlobalFree(h); return false; }   // CF_UNICODETEXT
+                    return true;
+                } finally { CloseClipboard(); }
+            }
+            System.Threading.Thread.Sleep(25);
+        }
+        return false;
+    }
+    public static bool Installed { get { return _hook != IntPtr.Zero; } }
+    public static void Install() {
+        if (_delay == null) { _delay = new Timer(); _delay.Interval = 150; _delay.Tick += delegate { _delay.Stop(); Advance(); }; }
+        if (_hook == IntPtr.Zero) { _ctrl = false; _pending = false; _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, IntPtr.Zero, 0); }
+    }
+    public static void Uninstall() { if (_hook != IntPtr.Zero) { UnhookWindowsHookEx(_hook); _hook = IntPtr.Zero; } if (_delay != null) _delay.Stop(); }
+    public static void SimulatePaste() { Advance(); }
+    public static void TriggerDelayed() { if (_delay != null) { _delay.Stop(); _delay.Start(); } }
+    static void Advance() {
+        if (Codes.Count == 0) return;
+        Codes.RemoveAt(0); Version++;
+        if (Codes.Count > 0) {
+            // the pasting app may still hold the clipboard open for a moment: retry, then let the widget's timer fix it
+            try { ClipboardStale = !SetClipText(Codes[0]); if (ClipboardStale) LastError = "clipboard busy"; }
+            catch (Exception ex) { ClipboardStale = true; LastError = ex.Message; }
+        }
+    }
+    static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
+        if (nCode >= 0) {
+            int msg = (int)wParam; int vk = Marshal.ReadInt32(lParam);
+            bool down = (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN), up = (msg == WM_KEYUP || msg == WM_SYSKEYUP);
+            if (vk == VK_LCONTROL || vk == VK_RCONTROL) { if (down) _ctrl = true; if (up) _ctrl = false; }
+            else if (vk == VK_V) {
+                if (down && _ctrl && Codes.Count > 0) _pending = true;   // the app reads the clipboard on key-down
+                if (up && _pending) { _pending = false; _delay.Stop(); _delay.Start(); }   // rotate shortly after the paste
+            }
+        }
+        return CallNextHookEx(_hook, nCode, wParam, lParam);
+    }
+}
+'@
+$script:Queue = @()          # account objects, in paste order
+$script:QueueTouched = Get-Date
+
+function Get-QueueCodes {
+    return @($script:Queue | ForEach-Object { Get-Totp -Key $_.key -Digits $_.digits -Period $_.period })
+}
+function Sync-QueueCodes {
+    # keep the C# side (and the clipboard head) fresh: TOTP codes rotate every 30 s
+    $codes = Get-QueueCodes
+    $headChanged = ($codes.Count -gt 0 -and ([PasteQueue]::Codes.Count -eq 0 -or [PasteQueue]::Codes[0] -ne $codes[0]))
+    [PasteQueue]::Codes.Clear(); foreach ($c in $codes) { [PasteQueue]::Codes.Add($c) }
+    if ($headChanged -or [PasteQueue]::ClipboardStale) {
+        try { [System.Windows.Clipboard]::SetText($codes[0]); [PasteQueue]::ClipboardStale = $false } catch { }
+    }
+}
+function Get-QueueText {
+    if ($script:Queue.Count -eq 0) { return '' }
+    return '붙여넣기 순서: ' + (($script:Queue | ForEach-Object { $_.name }) -join ' → ') + '   (Ctrl+V마다 다음 코드)'
+}
+function Add-ToQueue($acct) {
+    $script:Queue += $acct
+    $script:QueueTouched = Get-Date
+    Sync-QueueCodes
+    if ($script:Queue.Count -eq 1) {
+        [PasteQueue]::Uninstall(); [PasteQueue]::Install()
+        try { [System.Windows.Clipboard]::SetText([PasteQueue]::Codes[0]) } catch { }
+        return '복사됨!'
+    }
+    if (-not [PasteQueue]::Installed) { [PasteQueue]::Install() }
+    Show-Status (Get-QueueText)
+    return "$($script:Queue.Count)번째"
+}
+function Clear-Queue([string]$why) {
+    $script:Queue = @(); [PasteQueue]::Codes.Clear(); [PasteQueue]::Uninstall()
+    $script:QueueVersion = [PasteQueue]::Version
+    if ($why) { Show-Status $why }
+}
+$script:QueueVersion = [PasteQueue]::Version
+function Tick-Queue {
+    if ($script:Queue.Count -eq 0) { if ([PasteQueue]::Installed) { [PasteQueue]::Uninstall() }; return }
+    $v = [PasteQueue]::Version
+    if ($v -ne $script:QueueVersion) {
+        # the hook consumed (v - QueueVersion) codes
+        $consumed = [Math]::Min($v - $script:QueueVersion, $script:Queue.Count)
+        $script:QueueVersion = $v
+        if ($consumed -ge $script:Queue.Count) { Clear-Queue '붙여넣기 완료'; return }
+        $script:Queue = @($script:Queue | Select-Object -Skip $consumed)
+        $script:QueueTouched = Get-Date
+        $rest = ''; if ($script:Queue.Count -gt 1) { $rest = '  (남은 ' + $script:Queue.Count + '개)' }
+        Show-Status ('다음 붙여넣기: ' + $script:Queue[0].name + $rest)
+    }
+    if (((Get-Date) - $script:QueueTouched).TotalSeconds -gt 120) { Clear-Queue '붙여넣기 대기열이 2분 동안 사용되지 않아 비웠습니다'; return }
+    Sync-QueueCodes
+}
+
 # ---------- UI ----------
 [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -400,10 +535,10 @@ function Build-Rows {
         $row.Add_MouseLeave({ $this.Background = '#374151' })
         $row.Add_MouseLeftButtonUp({
             $acct = $this.Tag
-            $c = Get-Totp -Key $acct.key -Digits $acct.digits -Period $acct.period
-            [System.Windows.Clipboard]::SetText($c)
+            # first click copies; further clicks queue up - each Ctrl+V then pastes the next code
+            $label = Add-ToQueue $acct
             $nameTb = $this.Child.Children[0]
-            $nameTb.Text = '복사됨!'; $nameTb.Foreground = '#34D399'
+            $nameTb.Text = $label; $nameTb.Foreground = '#34D399'
             $t = New-Object System.Windows.Threading.DispatcherTimer
             $t.Interval = [TimeSpan]::FromMilliseconds(900)
             $t.Tag = @{ tb = $nameTb; name = $acct.name }
@@ -650,6 +785,7 @@ $script:Timer.Add_Tick({
     if ($vs -ne $script:LastVS) { $script:LastVS = $vs; Ensure-OnScreen "display changed to $vs" | Out-Null }
     if (($now - $script:LastTick).TotalSeconds -gt 30) { Ensure-OnScreen 'resume from sleep' | Out-Null }
     $script:LastTick = $now
+    Tick-Queue
     if ($script:Panel.Visibility -eq 'Visible') { Update-Codes }
 })
 $script:Timer.Start()
